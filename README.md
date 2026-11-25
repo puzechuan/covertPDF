@@ -1,14 +1,33 @@
-# PDF 合并（Cloudflare Worker）
+# PDF 工具箱（Cloudflare Worker）
 
-基于 Cloudflare Workers + `pdf-lib` 的 PDF 合并服务。文件在 Worker 内存中完成合并后直接下载，不写数据库、不落盘、不做持久化存储。
+基于 Cloudflare Workers + `pdf-lib` 的 PDF 合并服务，并提供一个完全在浏览器内运行的 PDF 标注编辑器。文件不写数据库、不落盘、不做持久化存储。
+
+## 页面
+
+| 页面 | 说明 |
+| --- | --- |
+| `/` | 主页面（`public/index.html`），选择「PDF 合并」或「PDF 编辑」 |
+| `/merge-pdf.html` | 多文件合并页面 |
+| `/edit-pdf.html` | 在线编辑页面 |
 
 ## 功能
 
+### PDF 合并（`/merge-pdf.html`）
+
 - 网页端拖拽/多选上传，可调顺序、可移除
 - 按列表顺序合并所有页面的 PDF
-- 服务端校验文件头（ `%PDF-` ）、数量与体积，拒绝加密 PDF
+- 服务端校验文件头（`%PDF-`）、数量与体积，拒绝加密 PDF
 - 合并结果以 `application/pdf` 直接下载，响应头带总页数
-- 独立的 `public/index.html`（内联 CSS/JS，无外部依赖）与 SVG/ICO favicon，由静态资源直接提供
+
+### PDF 编辑（`/edit-pdf.html`）
+
+- 浏览器内打开 PDF，逐页渲染，支持缩放与页面导航
+- 标注工具：自由画笔、高亮、矩形框、文字（支持中文）、橡皮擦
+- 每个页面独立撤销与清空，支持删除页面
+- 导出时**没有标注的页面直接复制原 PDF 页面**（保留矢量文字）；有标注的页面合成到页面中
+- 全程在浏览器内处理，文件不上传到服务器
+
+> 说明：带标注的页面会以约 144 DPI 合成，导出后该页文字不再可选中；未标注的页面不受影响。
 
 ## 快速开始
 
@@ -17,7 +36,7 @@ npm install
 npm run dev        # 本地开发，默认 http://localhost:8787
 ```
 
-浏览器打开 `http://localhost:8787`，选择多个 PDF，点击「开始合并」。
+浏览器打开 `http://localhost:8787` 进入主页面。
 
 部署到 Cloudflare：
 
@@ -29,9 +48,9 @@ npm run deploy
 
 ## API
 
-### `GET /`
+### `GET /`、`/merge-pdf.html`、`/edit-pdf.html`
 
-由 `public/index.html` 静态资源直接提供上传页面（不经 Worker）；`GET /favicon.svg`、`GET /favicon.ico` 同理。
+由 `public/` 下的静态资源直接提供（不经 Worker）；编辑页所需的 `/vendor/` 资源同理。
 
 ### `POST /merge`
 
@@ -56,24 +75,29 @@ curl -X POST http://localhost:8787/merge \
 
 | 项目 | 上限 |
 | --- | --- |
-| 单次文件数 | 30 个 |
-| 单文件大小 | 40 MB |
-| 单次总大小 | 60 MB |
+| 合并：单次文件数 | 30 个 |
+| 合并：单文件大小 | 40 MB |
+| 合并：单次总大小 | 60 MB |
+| 编辑：单文件大小 | 40 MB |
+| 编辑：页数 | 100 页 |
 
-Cloudflare Workers 免费版请求体上限为 100 MB、内存约 128 MB，上述限制为其留有余量。超大文件建议拆分处理或改用 R2 + 队列的异步方案。加密 PDF 请先解密后再上传。
+Cloudflare Workers 免费版请求体上限为 100 MB、内存约 128 MB，合并限制为其留有余量。超大文件建议拆分处理或改用 R2 + 队列的异步方案。加密 PDF 请先解密后再上传。
 
 ## 目录结构
 
 ```
-src/index.js          Worker 入口：/merge 与 /health、校验、合并、响应
-public/index.html     独立上传页面（内联 CSS/JS）
-public/favicon.svg    SVG 图标
-public/favicon.ico    ICO 图标（16px / 32px）
-wrangler.toml         Worker 配置（assets.directory = "./public/"）
+src/index.js                 Worker 入口：/merge 与 /health、校验、合并、响应
+public/index.html            主页面（内联 CSS/JS）
+public/merge-pdf.html        合并页面（内联 CSS/JS）
+public/edit-pdf.html         编辑页面（内联 CSS/JS）
+public/vendor/               pdf.js / pdf-lib 及字体资源（由 npm 包复制，无 CDN 依赖）
+public/favicon.svg           SVG 图标
+public/favicon.ico           ICO 图标（16px / 32px）
+wrangler.toml                Worker 配置（assets.directory = "./public/"）
 ```
 
 ## 构建检查
 
 ```bash
-npm run build   #  dry-run 打包到 dist/，确认无打包错误
+npm run build   # dry-run 打包到 dist/，确认无打包错误
 ```
