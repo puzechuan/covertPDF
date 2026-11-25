@@ -124,7 +124,6 @@ export const PAGE_HTML = `<!doctype html>
 <div class="wrap">
   <header>
     <h1>PDF 合并</h1>
-    <p>文件仅在 Worker 内存中处理，不会保存到服务器</p>
   </header>
 
   <div class="card">
