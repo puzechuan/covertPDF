@@ -47,6 +47,12 @@
   }
   .btn.primary:hover:not(:disabled) { background: var(--accent-dark); color: #fff; }
   .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .fname {
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    width: 200px; background: #fff;
+  }
+  .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .toolbar {
     flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
     padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line);
@@ -126,6 +132,7 @@
   <div class="top-actions">
     <label class="btn" for="fileInput">打开 PDF</label>
     <input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
+    <input class="fname" id="fileNameInput" type="text" maxlength="120" placeholder="导出文件名（可选）" title="留空则使用默认文件名">
     <button type="button" class="btn primary" id="exportBtn" disabled>导出 PDF</button>
   </div>
 </header>
@@ -233,6 +240,7 @@
   var textEditor = document.getElementById('textEditor');
   var textInput = document.getElementById('textInput');
   var statusEl = document.getElementById('status');
+  var fileNameInput = document.getElementById('fileNameInput');
 
   var state = {
     pdf: null,
@@ -892,6 +900,14 @@
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
+  function safeFileName(name, fallback) {
+    var s = String(name || '').trim();
+    if (!s) return fallback;
+    s = s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').slice(0, 120);
+    if (!/\.pdf$/i.test(s)) s += '.pdf';
+    return s;
+  }
+
   exportBtn.addEventListener('click', async function () {
     if (!state.pages.length) return;
     commitText();
@@ -942,7 +958,7 @@
       var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'edited-' + timestamp() + '.pdf';
+      a.download = safeFileName(fileNameInput.value, 'edited-' + timestamp() + '.pdf');
       document.body.appendChild(a);
       a.click();
       a.remove();

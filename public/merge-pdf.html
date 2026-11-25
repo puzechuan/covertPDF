@@ -95,6 +95,12 @@
     padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px;
   }
   .ghost:hover { color: var(--text); border-color: #9ca3af; }
+  .fname {
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    width: 180px; background: #fff;
+  }
+  .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .primary {
     border: 0; background: var(--accent); color: #fff; font-weight: 600;
     padding: 10px 22px; border-radius: 9px; cursor: pointer; font-size: 14px;
@@ -147,6 +153,7 @@
     <div class="bar">
       <div class="summary" id="summary">总大小 0 B</div>
       <div class="bar-right">
+        <input class="fname" id="fileNameInput" type="text" maxlength="120" placeholder="输出文件名（可选）" title="留空则使用默认文件名">
         <button type="button" class="ghost" id="clearBtn">清空</button>
         <button type="button" class="primary" id="mergeBtn">开始合并</button>
       </div>
@@ -174,6 +181,7 @@
   var statusEl = document.getElementById('status');
   var result = document.getElementById('result');
   var downloadLink = document.getElementById('downloadLink');
+  var fileNameInput = document.getElementById('fileNameInput');
   var files = [];
   var objectUrl = null;
   var dragDepth = 0;
@@ -188,6 +196,14 @@
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
+  }
+
+  function safeFileName(name, fallback) {
+    var s = String(name || '').trim();
+    if (!s) return fallback;
+    s = s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').slice(0, 120);
+    if (!/\.pdf$/i.test(s)) s += '.pdf';
+    return s;
   }
 
   function setStatus(text, kind) {
@@ -287,7 +303,9 @@
       var cd = res.headers.get('Content-Disposition') || '';
       var m = /filename="([^"]+)"/.exec(cd);
       downloadLink.href = objectUrl;
-      downloadLink.download = m ? m[1] : 'merged.pdf';
+      downloadLink.download = fileNameInput.value.trim()
+        ? safeFileName(fileNameInput.value, 'merged.pdf')
+        : (m ? m[1] : 'merged.pdf');
       downloadLink.textContent = '下载合并后的 PDF' + (pages ? '（共 ' + pages + ' 页，' + fmt(blob.size) + '）' : '');
       result.hidden = false;
       setStatus('合并完成！', 'success');
