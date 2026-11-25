@@ -178,7 +178,7 @@
           method: 'POST',
           body: JSON.stringify({ username: username, password: password, captchaToken: captchaToken, captchaCode: code })
         });
-        window.location.href = reg.user.role === 'admin' ? '/admin' : '/';
+        window.location.href = '/';
       } catch (e) {
         setStatus('注册失败：' + e.message, 'error');
         loadCaptcha();
@@ -194,7 +194,7 @@
         method: 'POST',
         body: JSON.stringify({ username: username, password: password })
       });
-      window.location.href = res.user.role === 'admin' ? '/admin' : '/';
+      window.location.href = '/';
     } catch (e) {
       setStatus('登录失败：' + e.message, 'error');
       submitBtn.disabled = false;
