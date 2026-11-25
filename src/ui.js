@@ -4,7 +4,7 @@ export const PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PDF 合并 · Cloudflare Worker</title>
+<title>PDF 合并</title>
 <style>
   :root {
     --bg: #f5f6fa;
