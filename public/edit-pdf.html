@@ -47,12 +47,6 @@
   }
   .btn.primary:hover:not(:disabled) { background: var(--accent-dark); color: #fff; }
   .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .fname {
-    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
-    font-family: inherit; font-size: 13px; color: var(--text);
-    width: 200px; background: #fff;
-  }
-  .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .toolbar {
     flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
     padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line);
@@ -132,7 +126,6 @@
   <div class="top-actions">
     <label class="btn" for="fileInput">打开 PDF</label>
     <input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
-    <input class="fname" id="fileNameInput" type="text" maxlength="120" placeholder="导出文件名（可选）" title="留空则使用默认文件名">
     <button type="button" class="btn primary" id="exportBtn" disabled>导出 PDF</button>
   </div>
 </header>
@@ -240,7 +233,6 @@
   var textEditor = document.getElementById('textEditor');
   var textInput = document.getElementById('textInput');
   var statusEl = document.getElementById('status');
-  var fileNameInput = document.getElementById('fileNameInput');
 
   var state = {
     pdf: null,
@@ -900,18 +892,36 @@
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
-  function safeFileName(name, fallback) {
-    var s = String(name || '').trim();
-    if (!s) return fallback;
-    s = s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').slice(0, 120);
-    if (!/\.pdf$/i.test(s)) s += '.pdf';
-    return s;
+  async function requestSaveHandle(defaultName) {
+    if (typeof window.showSaveFilePicker !== 'function') return { supported: false, handle: null };
+    try {
+      var handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{ description: 'PDF 文件', accept: { 'application/pdf': ['.pdf'] } }]
+      });
+      return { supported: true, handle: handle };
+    } catch (e) {
+      if (e && e.name === 'AbortError') return { canceled: true, supported: true, handle: null };
+      return { supported: false, handle: null };
+    }
+  }
+
+  async function writeToHandle(handle, bytes) {
+    var writable = await handle.createWritable();
+    await writable.write(bytes);
+    await writable.close();
   }
 
   exportBtn.addEventListener('click', async function () {
     if (!state.pages.length) return;
     commitText();
     exportBtn.disabled = true;
+    var save = await requestSaveHandle('edited-' + timestamp() + '.pdf');
+    if (save.canceled) {
+      setStatus('已取消保存。');
+      exportBtn.disabled = false;
+      return;
+    }
     try {
       var out = await PDFLib.PDFDocument.create();
       // 没有标注的页面直接从原文件复制，保留矢量文字与清晰度。
@@ -955,15 +965,20 @@
         setStatus('正在生成 PDF… ' + (i + 1) + ' / ' + state.pages.length);
       }
       var bytes = await out.save({ useObjectStreams: true });
-      var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = safeFileName(fileNameInput.value, 'edited-' + timestamp() + '.pdf');
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-      setStatus('导出完成，共 ' + state.pages.length + ' 页。', 'success');
+      if (save.handle) {
+        await writeToHandle(save.handle, bytes);
+        setStatus('已保存到所选位置，共 ' + state.pages.length + ' 页。', 'success');
+      } else {
+        var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'edited-' + timestamp() + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+        setStatus('当前浏览器不支持保存对话框，已下载到默认目录（' + state.pages.length + ' 页）。', 'info');
+      }
     } catch (e) {
       setStatus('导出失败：' + (e && e.message || e), 'error');
     } finally {

@@ -95,12 +95,6 @@
     padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px;
   }
   .ghost:hover { color: var(--text); border-color: #9ca3af; }
-  .fname {
-    border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px;
-    font-family: inherit; font-size: 13px; color: var(--text);
-    width: 180px; background: #fff;
-  }
-  .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .primary {
     border: 0; background: var(--accent); color: #fff; font-weight: 600;
     padding: 10px 22px; border-radius: 9px; cursor: pointer; font-size: 14px;
@@ -153,7 +147,6 @@
     <div class="bar">
       <div class="summary" id="summary">总大小 0 B</div>
       <div class="bar-right">
-        <input class="fname" id="fileNameInput" type="text" maxlength="120" placeholder="输出文件名（可选）" title="留空则使用默认文件名">
         <button type="button" class="ghost" id="clearBtn">清空</button>
         <button type="button" class="primary" id="mergeBtn">开始合并</button>
       </div>
@@ -181,7 +174,6 @@
   var statusEl = document.getElementById('status');
   var result = document.getElementById('result');
   var downloadLink = document.getElementById('downloadLink');
-  var fileNameInput = document.getElementById('fileNameInput');
   var files = [];
   var objectUrl = null;
   var dragDepth = 0;
@@ -198,12 +190,30 @@
     });
   }
 
-  function safeFileName(name, fallback) {
-    var s = String(name || '').trim();
-    if (!s) return fallback;
-    s = s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').slice(0, 120);
-    if (!/\.pdf$/i.test(s)) s += '.pdf';
-    return s;
+  function timestamp() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  async function requestSaveHandle(defaultName) {
+    if (typeof window.showSaveFilePicker !== 'function') return { supported: false, handle: null };
+    try {
+      var handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{ description: 'PDF 文件', accept: { 'application/pdf': ['.pdf'] } }]
+      });
+      return { supported: true, handle: handle };
+    } catch (e) {
+      if (e && e.name === 'AbortError') return { canceled: true, supported: true, handle: null };
+      return { supported: false, handle: null };
+    }
+  }
+
+  async function writeToHandle(handle, blob) {
+    var writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
   }
 
   function setStatus(text, kind) {
@@ -286,6 +296,12 @@
     if (!files.length) { setStatus('请先添加 PDF 文件。', 'error'); return; }
     mergeBtn.disabled = true;
     result.hidden = true;
+    var save = await requestSaveHandle('merged-' + timestamp() + '.pdf');
+    if (save.canceled) {
+      setStatus('已取消保存。', 'info');
+      mergeBtn.disabled = false;
+      return;
+    }
     setStatus('正在上传并合并，请稍候…', 'info');
     var fd = new FormData();
     files.forEach(function (f) { fd.append('files', f, f.name); });
@@ -303,13 +319,16 @@
       var cd = res.headers.get('Content-Disposition') || '';
       var m = /filename="([^"]+)"/.exec(cd);
       downloadLink.href = objectUrl;
-      downloadLink.download = fileNameInput.value.trim()
-        ? safeFileName(fileNameInput.value, 'merged.pdf')
-        : (m ? m[1] : 'merged.pdf');
-      downloadLink.textContent = '下载合并后的 PDF' + (pages ? '（共 ' + pages + ' 页，' + fmt(blob.size) + '）' : '');
+      downloadLink.download = m ? m[1] : 'merged.pdf';
+      downloadLink.textContent = '再次下载合并后的 PDF' + (pages ? '（共 ' + pages + ' 页，' + fmt(blob.size) + '）' : '');
       result.hidden = false;
-      setStatus('合并完成！', 'success');
-      downloadLink.click();
+      if (save.handle) {
+        await writeToHandle(save.handle, blob);
+        setStatus('已保存到所选位置！', 'success');
+      } else {
+        setStatus('合并完成！当前浏览器不支持保存对话框，已下载到默认目录。', 'info');
+        downloadLink.click();
+      }
     } catch (err) {
       setStatus('合并失败：' + err.message, 'error');
     } finally {
