@@ -1,5 +1,4 @@
 import { PDFDocument } from 'pdf-lib';
-import { PAGE_HTML } from './ui.js';
 
 // Workers 单请求体上限 100MB、内存 128MB，这里留出解析与合并时的余量。
 const MAX_FILES = 30;
@@ -125,19 +124,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    if (url.pathname === '/' || url.pathname === '/index.html') {
-      if (request.method !== 'GET' && request.method !== 'HEAD') {
-        return json({ error: 'Method Not Allowed' }, 405);
-      }
-      return new Response(PAGE_HTML, {
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          ...CORS_HEADERS,
-        },
-      });
-    }
-
+    // "/" 与 "/index.html" 由 public/ 下的静态资源提供，不经过 Worker。
     if (url.pathname === '/merge') {
       if (request.method !== 'POST') {
         return json({ error: 'Method Not Allowed，请使用 POST。' }, 405);

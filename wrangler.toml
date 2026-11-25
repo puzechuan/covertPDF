@@ -2,6 +2,9 @@ name = "covert-pdf"
 main = "src/index.js"
 compatibility_date = "2025-06-01"
 
-# Worker 只在内存中处理文件，不写入 R2/KV，因此无需绑定任何资源。
+# 页面与图标由静态资源直接提供，Worker 只处理 /merge 与 /health。
+[assets]
+directory = "./public/"
+
 [observability]
 enabled = true

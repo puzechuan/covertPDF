@@ -8,6 +8,7 @@
 - 按列表顺序合并所有页面的 PDF
 - 服务端校验文件头（ `%PDF-` ）、数量与体积，拒绝加密 PDF
 - 合并结果以 `application/pdf` 直接下载，响应头带总页数
+- 独立的 `public/index.html`（内联 CSS/JS，无外部依赖）与 SVG/ICO favicon，由静态资源直接提供
 
 ## 快速开始
 
@@ -30,7 +31,7 @@ npm run deploy
 
 ### `GET /`
 
-返回上传页面。
+由 `public/index.html` 静态资源直接提供上传页面（不经 Worker）；`GET /favicon.svg`、`GET /favicon.ico` 同理。
 
 ### `POST /merge`
 
@@ -64,9 +65,11 @@ Cloudflare Workers 免费版请求体上限为 100 MB、内存约 128 MB，上�
 ## 目录结构
 
 ```
-src/index.js   Worker 入口：路由、校验、合并、响应
-src/ui.js      上传页面（以字符串导出，便于 esbuild 打包）
-wrangler.toml  Worker 配置
+src/index.js          Worker 入口：/merge 与 /health、校验、合并、响应
+public/index.html     独立上传页面（内联 CSS/JS）
+public/favicon.svg    SVG 图标
+public/favicon.ico    ICO 图标（16px / 32px）
+wrangler.toml         Worker 配置（assets.directory = "./public/"）
 ```
 
 ## 构建检查

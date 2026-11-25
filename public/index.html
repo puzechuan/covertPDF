@@ -1,10 +1,11 @@
-// 页面以字符串形式导出，Wrangler/esbuild 无需额外 loader 即可打包。
-export const PAGE_HTML = `<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PDF合并</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" href="/favicon.ico" sizes="any">
 <style>
   :root {
     --bg: #f5f6fa;
@@ -219,7 +220,7 @@ export const PAGE_HTML = `<!doctype html>
     var added = 0;
     var skipped = 0;
     Array.prototype.forEach.call(fileList, function (file) {
-      if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { skipped++; return; }
+      if (!/.pdf$/i.test(file.name) && file.type !== 'application/pdf') { skipped++; return; }
       files.push(file);
       added++;
     });
@@ -302,4 +303,4 @@ export const PAGE_HTML = `<!doctype html>
 })();
 </script>
 </body>
-</html>`;
+</html>
