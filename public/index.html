@@ -66,8 +66,9 @@
     .grid { grid-template-columns: 1fr; }
   }
 </style>
+<style>body.auth-gate { visibility: hidden; }</style>
 </head>
-<body>
+<body class="auth-gate">
 <div class="wrap">
   <header>
     <span class="badge">本地处理 · 无需登录</span>
@@ -119,5 +120,9 @@
 
   <div class="note">编辑与合并均不保存文件；关闭页面后内容不会保留</div>
 </div>
+<script src="/gate.js"></script>
+<script>
+requireAuth().then(function (ok) { if (ok) document.body.classList.remove('auth-gate'); });
+</script>
 </body>
 </html>

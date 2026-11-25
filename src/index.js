@@ -324,6 +324,10 @@ export default {
     }
 
     if (url.pathname === '/merge') {
+      if (!env.DB) return json({ error: '数据库未配置。' }, 500);
+      if (!(await currentUser(request, env))) {
+        return json({ error: '请先登录后再使用合并功能。' }, 401);
+      }
       if (request.method !== 'POST') return json({ error: 'Method Not Allowed，请使用 POST。' }, 405);
       try {
         return await handleMerge(request);

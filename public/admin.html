@@ -113,6 +113,11 @@
 
   async function load() {
     try {
+      var settings = await api('/auth/settings');
+      if (!settings.initialized) {
+        window.location.replace('/init');
+        return;
+      }
       var me = await api('/auth/me');
       if (!me.user) { loginCard.hidden = false; return; }
       if (me.user.role !== 'admin') {
@@ -121,7 +126,6 @@
         return;
       }
       adminView.hidden = false;
-      var settings = await api('/auth/settings');
       regToggle.checked = !!settings.registrationEnabled;
       await loadUsers();
     } catch (e) { setStatus(e.message, 'error'); }

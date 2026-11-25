@@ -120,7 +120,10 @@
   async function load() {
     try {
       settings = await api('/auth/settings');
-      if (!settings.initialized) setStatus('系统尚未初始化管理员，请先访问 /init 完成初始化。', 'error');
+      if (!settings.initialized) {
+        window.location.replace('/init');
+        return;
+      }
       var me = await api('/auth/me');
       if (me.user) showSigned(me.user);
     } catch (e) { setStatus(e.message, 'error'); }
