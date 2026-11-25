@@ -18,18 +18,18 @@
   label { display:block; font-size:13px; color:var(--muted); margin:14px 0 6px; }
   input[type=email], input[type=text] { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none; }
   input:focus { border-color:var(--accent); box-shadow:0 0 0 2px #eef2ff; }
-  .code-row { display:flex; gap:8px; }
-  .code-row input { flex:1; }
+  .captcha-row { display:flex; gap:8px; align-items:center; }
+  .captcha-row input { flex:1; }
+  .captcha-row img { width:150px; height:48px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:#f8fafc; }
+  .hint { font-size:12px; color:var(--muted); margin-top:4px; }
   button { font-family:inherit; }
   .btn { border:0; background:var(--accent); color:#fff; font-weight:600; padding:10px 14px; border-radius:9px; cursor:pointer; font-size:14px; white-space:nowrap; }
   .btn:hover:not(:disabled) { background:#4338ca; }
   .btn:disabled { opacity:.55; cursor:wait; }
-  .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   .btn.block { width:100%; margin-top:20px; padding:11px; }
   .status { margin-top:14px; min-height:22px; font-size:13px; color:var(--muted); }
   .status.error { color:var(--danger); }
   .status.success { color:var(--ok); }
-  .devcode { margin-top:8px; padding:8px 10px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:13px; word-break:break-all; }
   a.btn { display:inline-block; text-decoration:none; text-align:center; }
   [hidden] { display:none !important; }
 </style>
@@ -42,19 +42,19 @@
       <div class="notice"><strong>仅首次使用：</strong>在这里注册的账号会成为管理员，之后其他页面注册的均为普通用户。管理员账号只能初始化一次。</div>
       <label for="email">管理员邮箱</label>
       <input type="email" id="email" placeholder="name@example.com" autocomplete="email">
-      <label for="code">验证码</label>
-      <div class="code-row">
-        <input type="text" id="code" placeholder="邮件中的验证码" autocomplete="one-time-code">
-        <button type="button" class="btn ghost" id="sendBtn">获取验证码</button>
+      <label for="code">图片验证码</label>
+      <div class="captcha-row">
+        <input type="text" id="code" placeholder="请输入图中字符" autocomplete="off">
+        <img id="captchaImg" alt="点击更换验证码" title="点击更换验证码">
       </div>
+      <div class="hint">不区分大小写；看不清可点击图片更换一张。</div>
       <button type="button" class="btn block" id="submitBtn">完成初始化</button>
       <div class="status" id="status"></div>
-      <div class="devcode" id="devCode" hidden></div>
     </div>
     <div id="doneView" hidden style="text-align:center;padding:12px 0">
       <h2 style="font-size:18px;margin:0 0 8px">管理员已初始化</h2>
       <p style="color:var(--muted);font-size:13px">无需再次初始化。请使用已注册账号登录。</p>
-      <a class="btn ghost" href="/login" style="margin-top:14px">前往登录</a>
+      <a class="btn" href="/login" style="margin-top:14px">前往登录</a>
     </div>
   </div>
 </div>
@@ -66,10 +66,10 @@
   var doneView = document.getElementById('doneView');
   var emailEl = document.getElementById('email');
   var codeEl = document.getElementById('code');
-  var sendBtn = document.getElementById('sendBtn');
+  var captchaImg = document.getElementById('captchaImg');
   var submitBtn = document.getElementById('submitBtn');
   var statusEl = document.getElementById('status');
-  var devCodeEl = document.getElementById('devCode');
+  var captchaToken = '';
 
   function setStatus(text, kind) {
     statusEl.textContent = text;
@@ -84,49 +84,44 @@
     return data;
   }
 
+  async function loadCaptcha() {
+    try {
+      var res = await api('/auth/captcha');
+      captchaToken = res.token;
+      captchaImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(res.svg);
+      codeEl.value = '';
+    } catch (e) { setStatus('加载验证码失败：' + e.message, 'error'); }
+  }
+
   async function load() {
     try {
       var settings = await api('/auth/settings');
       if (settings.initialized) {
         initView.hidden = true;
         doneView.hidden = false;
+        return;
       }
+      loadCaptcha();
     } catch (e) { setStatus(e.message, 'error'); }
   }
 
-  sendBtn.addEventListener('click', async function () {
-    var email = emailEl.value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('请输入有效的邮箱地址。', 'error'); return; }
-    sendBtn.disabled = true;
-    setStatus('正在发送验证码…');
-    try {
-      var res = await api('/auth/send-code', {
-        method: 'POST',
-        body: JSON.stringify({ email: email, purpose: 'init' })
-      });
-      if (res.devCode) {
-        devCodeEl.hidden = false;
-        devCodeEl.textContent = '开发模式验证码：' + res.devCode + '（未配置邮件服务时仅在本地返回）';
-      }
-      setStatus('验证码已发送到该邮箱，请查收。', 'success');
-    } catch (e) { setStatus('发送失败：' + e.message, 'error'); }
-    sendBtn.disabled = false;
-  });
+  captchaImg.addEventListener('click', loadCaptcha);
 
   submitBtn.addEventListener('click', async function () {
     var email = emailEl.value.trim();
     var code = codeEl.value.trim();
-    if (!email || !code) { setStatus('请填写邮箱和验证码。', 'error'); return; }
+    if (!email || !code) { setStatus('请填写邮箱和图片验证码。', 'error'); return; }
     submitBtn.disabled = true;
     setStatus('正在验证并创建管理员…');
     try {
       await api('/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email: email, code: code, isInit: true })
+        body: JSON.stringify({ email: email, captchaToken: captchaToken, captchaCode: code, isInit: true })
       });
       window.location.href = '/admin';
     } catch (e) {
       setStatus('初始化失败：' + e.message, 'error');
+      loadCaptcha();
       submitBtn.disabled = false;
     }
   });

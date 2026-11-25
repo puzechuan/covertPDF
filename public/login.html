@@ -20,23 +20,24 @@
   label { display:block; font-size:13px; color:var(--muted); margin:14px 0 6px; }
   input[type=email], input[type=text] { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none; }
   input:focus { border-color:var(--accent); box-shadow:0 0 0 2px #eef2ff; }
-  .code-row { display:flex; gap:8px; }
-  .code-row input { flex:1; }
+  .captcha-row { display:flex; gap:8px; align-items:center; }
+  .captcha-row input { flex:1; }
+  .captcha-row img { width:150px; height:48px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:#f8fafc; }
+  .hint { font-size:12px; color:var(--muted); margin-top:4px; }
   button { font-family:inherit; }
   .btn { border:0; background:var(--accent); color:#fff; font-weight:600; padding:10px 14px; border-radius:9px; cursor:pointer; font-size:14px; white-space:nowrap; }
   .btn:hover:not(:disabled) { background:#4338ca; }
   .btn:disabled { opacity:.55; cursor:wait; }
-  .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   .btn.block { width:100%; margin-top:20px; padding:11px; }
   .status { margin-top:14px; min-height:22px; font-size:13px; color:var(--muted); }
   .status.error { color:var(--danger); }
   .status.success { color:var(--ok); }
-  .devcode { margin-top:8px; padding:8px 10px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:13px; word-break:break-all; }
   .signed { text-align:center; padding:10px 0; }
   .signed h2 { font-size:18px; margin:0 0 6px; }
   .signed p { color:var(--muted); font-size:13px; word-break:break-all; }
   .signed .links { display:flex; gap:10px; justify-content:center; margin-top:18px; }
   a.btn { display:inline-block; text-decoration:none; text-align:center; }
+  .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -51,14 +52,14 @@
       </div>
       <label for="email">邮箱</label>
       <input type="email" id="email" placeholder="name@example.com" autocomplete="email">
-      <label for="code">验证码</label>
-      <div class="code-row">
-        <input type="text" id="code" placeholder="邮件中的验证码" autocomplete="one-time-code">
-        <button type="button" class="btn ghost" id="sendBtn">获取验证码</button>
+      <label for="code">图片验证码</label>
+      <div class="captcha-row">
+        <input type="text" id="code" placeholder="请输入图中字符" autocomplete="off">
+        <img id="captchaImg" alt="点击更换验证码" title="点击更换验证码">
       </div>
+      <div class="hint">不区分大小写；看不清可点击图片更换一张。</div>
       <button type="button" class="btn block" id="submitBtn">登录</button>
       <div class="status" id="status"></div>
-      <div class="devcode" id="devCode" hidden></div>
     </div>
     <div class="signed" id="signedView" hidden>
       <h2>已登录</h2>
@@ -77,17 +78,16 @@
   'use strict';
   var emailEl = document.getElementById('email');
   var codeEl = document.getElementById('code');
-  var sendBtn = document.getElementById('sendBtn');
+  var captchaImg = document.getElementById('captchaImg');
   var submitBtn = document.getElementById('submitBtn');
   var statusEl = document.getElementById('status');
-  var devCodeEl = document.getElementById('devCode');
   var authView = document.getElementById('authView');
   var signedView = document.getElementById('signedView');
   var signedEmail = document.getElementById('signedEmail');
   var signOutBtn = document.getElementById('signOutBtn');
   var mode = 'login';
   var settings = { registrationEnabled: true, initialized: true };
-  var sentEmail = '';
+  var captchaToken = '';
 
   function setStatus(text, kind) {
     statusEl.textContent = text;
@@ -100,6 +100,15 @@
     try { data = await res.json(); } catch (e) {}
     if (!res.ok) throw new Error(data.error || ('请求失败（HTTP ' + res.status + '）'));
     return data;
+  }
+
+  async function loadCaptcha() {
+    try {
+      var res = await api('/auth/captcha');
+      captchaToken = res.token;
+      captchaImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(res.svg);
+      codeEl.value = '';
+    } catch (e) { setStatus('加载验证码失败：' + e.message, 'error'); }
   }
 
   function showSigned(user) {
@@ -115,56 +124,38 @@
       var me = await api('/auth/me');
       if (me.user) showSigned(me.user);
     } catch (e) { setStatus(e.message, 'error'); }
+    loadCaptcha();
   }
+
+  captchaImg.addEventListener('click', loadCaptcha);
 
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (tab) {
     tab.addEventListener('click', function () {
       mode = tab.dataset.mode;
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) { t.classList.toggle('active', t === tab); });
       submitBtn.textContent = mode === 'login' ? '登录' : '注册';
-      codeEl.value = '';
-      sentEmail = '';
-      devCodeEl.hidden = true;
       setStatus('');
+      loadCaptcha();
     });
-  });
-
-  sendBtn.addEventListener('click', async function () {
-    var email = emailEl.value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('请输入有效的邮箱地址。', 'error'); return; }
-    if (mode === 'register' && !settings.registrationEnabled) { setStatus('当前已关闭用户注册。', 'error'); return; }
-    sendBtn.disabled = true;
-    setStatus('正在发送验证码…');
-    try {
-      var res = await api('/auth/send-code', {
-        method: 'POST',
-        body: JSON.stringify({ email: email, purpose: mode })
-      });
-      sentEmail = email;
-      if (res.devCode) {
-        devCodeEl.hidden = false;
-        devCodeEl.textContent = '开发模式验证码：' + res.devCode + '（未配置邮件服务时仅在本地返回）';
-      }
-      setStatus('验证码已发送到该邮箱，请查收。', 'success');
-    } catch (e) { setStatus('发送失败：' + e.message, 'error'); }
-    sendBtn.disabled = false;
   });
 
   submitBtn.addEventListener('click', async function () {
     var email = emailEl.value.trim();
     var code = codeEl.value.trim();
-    if (!email || !code) { setStatus('请填写邮箱和验证码。', 'error'); return; }
-    if (sentEmail !== email) { setStatus('请先获取当前邮箱的验证码。', 'error'); return; }
+    if (!email || !code) { setStatus('请填写邮箱和图片验证码。', 'error'); return; }
     if (mode === 'register' && !settings.registrationEnabled) { setStatus('当前已关闭用户注册。', 'error'); return; }
     submitBtn.disabled = true;
     setStatus('正在验证…');
     try {
       var res = await api(mode === 'login' ? '/auth/login' : '/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email: email, code: code })
+        body: JSON.stringify({ email: email, captchaToken: captchaToken, captchaCode: code })
       });
       showSigned(res.user);
-    } catch (e) { setStatus('验证失败：' + e.message, 'error'); }
+    } catch (e) {
+      setStatus('验证失败：' + e.message, 'error');
+      loadCaptcha();
+    }
     submitBtn.disabled = false;
   });
 

@@ -37,24 +37,20 @@
 
 ### 用户系统（Cloudflare D1）
 
-- `/init`：首次访问时用邮箱验证码注册管理员。初始化完成后该页面关闭，后续注册的用户都是普通用户。
-- `/login`：邮箱验证码登录或注册。登录和注册都只需邮箱 + 验证码，没有密码。
+- `/init`：首次访问时用图片验证码注册管理员。初始化完成后该页面关闭，后续注册的用户都是普通用户。
+- `/login`：图片验证码登录或注册。登录和注册都只需邮箱 + 图片验证码，没有密码，也不发送邮件。
 - `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
 
-用户数据保存在 Cloudflare D1 数据库 `covert-pdf-users`（Worker binding 名为 `DB`），表结构见 `migrations/0001_user_system.sql`：
+用户数据保存在 Cloudflare D1 数据库 `covert-pdf-users`（Worker binding 名为 `DB`），表结构见 `migrations/`：
 
 | 表 | 用途 |
 | --- | --- |
 | `users` | 用户邮箱、角色（admin / user）、注册时间 |
-| `verification_codes` | 邮箱验证码，5 分钟有效，使用后置为已用 |
+| `captchas` | 图片验证码 token、答案，5 分钟有效，使用后置为已用 |
 | `sessions` | 登录会话 token，7 天有效，通过 HttpOnly Cookie 传递 |
 | `settings` | `registration_enabled` 注册开关与 `initialized` 初始化状态 |
 
-**邮件发送**：配置 `RESEND_API_KEY` 密钥后会通过 Resend 发送真实验证码邮件，发件地址由 `EMAIL_FROM` 变量控制（需为已验证域名）。未配置密钥时，本地开发会在页面上直接显示验证码，方便自测；部署前务必配置密钥，否则验证码会公开返回。
-
-```bash
-npx wrangler secret put RESEND_API_KEY
-```
+验证码由 Worker 生成 SVG 图片（带字符旋转与干扰线），无需邮件服务或第三方密钥。点击图片可更换一张。
 
 **数据库迁移**：
 
@@ -105,9 +101,9 @@ curl -X POST http://localhost:8787/merge \
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/auth/send-code` | `{ email, purpose }`，purpose 为 `login` / `register` / `init`，发送验证码 |
-| `POST` | `/auth/register` | `{ email, code, isInit? }`，注册用户或初始化管理员 |
-| `POST` | `/auth/login` | `{ email, code }`，验证码登录 |
+| `GET` | `/auth/captcha` | 返回 `{ token, svg }`，生成图片验证码 |
+| `POST` | `/auth/register` | `{ email, captchaToken, captchaCode, isInit? }`，注册用户或初始化管理员 |
+| `POST` | `/auth/login` | `{ email, captchaToken, captchaCode }`，图片验证码登录 |
 | `POST` | `/auth/logout` | 退出登录并清除会话 |
 | `GET` | `/auth/me` | 返回当前登录用户，未登录返回 `{ user: null }` |
 | `GET` | `/auth/settings` | 返回 `{ registrationEnabled, initialized }` |

@@ -100,41 +100,54 @@ async function setSetting(env, key, value) {
     .run();
 }
 
-function generateCode() {
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomInt(max) {
   const values = new Uint32Array(1);
   crypto.getRandomValues(values);
-  return String(values[0] % 1000000).padStart(6, '0');
+  return values[0] % max;
 }
 
-async function sendCodeEmail(env, email, code) {
-  // 未配置 RESEND_API_KEY 时只在本地/开发环境返回验证码，方便自测。
-  if (!env.RESEND_API_KEY) return { devCode: code };
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: env.EMAIL_FROM || 'PDF工具箱 <onboarding@resend.dev>',
-      to: [email],
-      subject: 'PDF 工具箱验证码',
-      text: `您的验证码是 ${code}，${CODE_SECONDS / 60} 分钟内有效。如非本人操作请忽略。`,
-    }),
-  });
-  if (!response.ok) throw new Error('验证码邮件发送失败，请稍后重试');
-  return {};
+function generateCaptchaCode() {
+  let code = '';
+  for (let i = 0; i < 5; i++) code += CAPTCHA_CHARS[randomInt(CAPTCHA_CHARS.length)];
+  return code;
 }
 
-async function consumeCode(env, email, code) {
+function captchaSvg(code) {
+  const width = 150;
+  const height = 48;
+  const parts = [`<rect width="100%" height="100%" fill="#f8fafc"/>`];
+  for (let i = 0; i < code.length; i++) {
+    const x = 14 + i * 27;
+    const y = 33 + randomInt(7) - 3;
+    const rotate = randomInt(40) - 20;
+    const hue = randomInt(360);
+    parts.push(
+      `<text x="${x}" y="${y}" transform="rotate(${rotate} ${x} ${y})" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="hsl(${hue}, 65%, 35%)">${code[i]}</text>`
+    );
+  }
+  for (let i = 0; i < 4; i++) {
+    const x1 = randomInt(width), y1 = randomInt(height);
+    const x2 = randomInt(width), y2 = randomInt(height);
+    parts.push(
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="hsl(${randomInt(360)}, 50%, 60%)" stroke-width="1" opacity="0.6"/>`
+    );
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
+}
+
+async function consumeCaptcha(env, token, code) {
+  if (!token || !code) return false;
   const now = Math.floor(Date.now() / 1000);
+  const answer = String(code).trim().toUpperCase();
   const row = await env.DB.prepare(
-    'SELECT id FROM verification_codes WHERE email = ? AND code = ? AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1'
+    'SELECT id FROM captchas WHERE token = ? AND code = ? AND used = 0 AND expires_at > ? LIMIT 1'
   )
-    .bind(email, code, now)
+    .bind(String(token), answer, now)
     .first();
   if (!row) return false;
-  await env.DB.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').bind(row.id).run();
+  await env.DB.prepare('UPDATE captchas SET used = 1 WHERE id = ?').bind(row.id).run();
   return true;
 }
 
@@ -149,38 +162,15 @@ async function createSession(env, request, userId) {
 
 // ---------- 用户系统路由 ----------
 
-async function handleSendCode(request, env) {
-  const body = await readBody(request);
-  if (!body || !isValidEmail(body.email)) return json({ error: '请输入有效的邮箱地址。' }, 400);
-  const email = body.email.trim().toLowerCase();
-  const purpose = body.purpose === 'init' || body.purpose === 'register' ? body.purpose : 'login';
-
-  if (purpose === 'register' && (await getSetting(env, 'registration_enabled')) === '0') {
-    return json({ error: '当前已关闭用户注册。' }, 403);
-  }
-  if (purpose === 'init' && (await getSetting(env, 'initialized')) === '1') {
-    return json({ error: '管理员已初始化，无需重复操作。' }, 403);
-  }
-  if (purpose === 'login') {
-    const user = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-    if (!user) return json({ error: '该邮箱尚未注册，请先注册。' }, 400);
-  }
-
-  const code = generateCode();
+async function handleCaptcha(request, env) {
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare('DELETE FROM verification_codes WHERE email = ? OR expires_at < ?')
-    .bind(email, now - 60)
+  await env.DB.prepare('DELETE FROM captchas WHERE expires_at < ?').bind(now - 60).run();
+  const code = generateCaptchaCode();
+  const token = crypto.randomUUID().replace(/-/g, '');
+  await env.DB.prepare('INSERT INTO captchas (token, code, expires_at) VALUES (?, ?, ?)')
+    .bind(token, code, now + CODE_SECONDS)
     .run();
-  await env.DB.prepare('INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)')
-    .bind(email, code, now + CODE_SECONDS)
-    .run();
-
-  try {
-    const extra = await sendCodeEmail(env, email, code);
-    return json({ ok: true, ...extra });
-  } catch (e) {
-    return json({ error: String(e?.message || e) }, 500);
-  }
+  return json({ token, svg: captchaSvg(code) });
 }
 
 async function handleRegister(request, env) {
@@ -195,8 +185,8 @@ async function handleRegister(request, env) {
   if (!isInit && (await getSetting(env, 'registration_enabled')) === '0') {
     return json({ error: '当前已关闭用户注册。' }, 403);
   }
-  if (!body.code || !(await consumeCode(env, email, String(body.code).trim()))) {
-    return json({ error: '验证码错误或已过期。' }, 400);
+  if (!(await consumeCaptcha(env, body.captchaToken, body.captchaCode))) {
+    return json({ error: '图片验证码错误或已过期。' }, 400);
   }
   if (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) {
     return json({ error: '该邮箱已注册。' }, 400);
@@ -218,8 +208,8 @@ async function handleLogin(request, env) {
   const email = body.email.trim().toLowerCase();
   const user = await env.DB.prepare('SELECT id, email, role FROM users WHERE email = ?').bind(email).first();
   if (!user) return json({ error: '该邮箱尚未注册。' }, 400);
-  if (!body.code || !(await consumeCode(env, email, String(body.code).trim()))) {
-    return json({ error: '验证码错误或已过期。' }, 400);
+  if (!(await consumeCaptcha(env, body.captchaToken, body.captchaCode))) {
+    return json({ error: '图片验证码错误或已过期。' }, 400);
   }
   const cookie = await createSession(env, request, user.id);
   return json({ ok: true, user }, 200, { 'Set-Cookie': cookie });
@@ -345,7 +335,7 @@ export default {
     if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/admin/')) {
       if (!env.DB) return json({ error: '数据库未配置。' }, 500);
       try {
-        if (url.pathname === '/auth/send-code' && request.method === 'POST') return await handleSendCode(request, env);
+        if (url.pathname === '/auth/captcha' && request.method === 'GET') return await handleCaptcha(request, env);
         if (url.pathname === '/auth/register' && request.method === 'POST') return await handleRegister(request, env);
         if (url.pathname === '/auth/login' && request.method === 'POST') return await handleLogin(request, env);
         if (url.pathname === '/auth/logout' && request.method === 'POST') return await handleLogout(request, env);
