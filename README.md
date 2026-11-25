@@ -10,7 +10,7 @@
 | `/merge-pdf.html` | 多文件合并页面 |
 | `/edit-pdf.html` | 在线编辑页面 |
 | `/init` | 首次初始化管理员（在该页注册的账号成为管理员，仅一次） |
-| `/login` | 邮箱验证码登录 / 注册 |
+| `/login` | 用户名密码登录 / 注册（注册需图片验证码） |
 | `/admin` | 用户管理：注册开关与已注册用户列表 |
 
 两个页面导出时都会弹出系统「另存为」窗口（Chrome / Edge 等支持 File System Access API 的浏览器），可直接在资源管理器里选择保存位置并修改文件名；取消则不会生成文件。Safari / Firefox 等不支持该 API 的浏览器会回退到普通下载，使用带时间戳的默认文件名。
@@ -39,15 +39,15 @@
 
 所有功能（首页、PDF 合并、PDF 编辑、用户管理）都需要登录后才能使用。打开任意工具页时会自动检查：未初始化则跳转 `/init`，未登录则跳转 `/login`。`/merge` 接口也在服务端校验登录态，未登录返回 401。
 
-- `/init`：首次访问时用图片验证码注册管理员。初始化完成后该页面关闭，后续注册的用户都是普通用户。
-- `/login`：图片验证码登录或注册。登录和注册都只需邮箱 + 图片验证码，没有密码，也不发送邮件。
+- `/init`：首次访问时创建管理员账号（用户名 + 密码，只能初始化一次）。初始化完成后该页面关闭。
+- `/login`：所有用户统一使用用户名 + 密码登录；注册时额外需要图片验证码。不发送邮件。
 - `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
 
 用户数据保存在 Cloudflare D1 数据库 `covert-pdf-users`（Worker binding 名为 `DB`），表结构见 `migrations/`：
 
 | 表 | 用途 |
 | --- | --- |
-| `users` | 用户邮箱、角色（admin / user）、注册时间 |
+| `users` | 用户名（`username`）、密码哈希（`password_hash`）、角色（admin / user）、注册时间 |
 | `captchas` | 图片验证码 token、答案，5 分钟有效，使用后置为已用 |
 | `sessions` | 登录会话 token，7 天有效，通过 HttpOnly Cookie 传递 |
 | `settings` | `registration_enabled` 注册开关与 `initialized` 初始化状态 |
@@ -104,8 +104,9 @@ curl -X POST http://localhost:8787/merge \
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/auth/captcha` | 返回 `{ token, svg }`，生成图片验证码 |
-| `POST` | `/auth/register` | `{ email, captchaToken, captchaCode, isInit? }`，注册用户或初始化管理员 |
-| `POST` | `/auth/login` | `{ email, captchaToken, captchaCode }`，图片验证码登录 |
+| `POST` | `/auth/init` | `{ username, password }`，首次创建管理员账号 |
+| `POST` | `/auth/register` | `{ username, password, captchaToken, captchaCode }`，注册普通用户 |
+| `POST` | `/auth/login` | `{ username, password }`，用户名密码登录 |
 | `POST` | `/auth/logout` | 退出登录并清除会话 |
 | `GET` | `/auth/me` | 返回当前登录用户，未登录返回 `{ user: null }` |
 | `GET` | `/auth/settings` | 返回 `{ registrationEnabled, initialized }` |

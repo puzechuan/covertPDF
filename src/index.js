@@ -46,8 +46,8 @@ async function hasPdfHeader(file) {
 
 // ---------- 用户系统辅助函数 ----------
 
-function isValidEmail(email) {
-  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && email.length <= 254;
+function isValidUsername(username) {
+  return typeof username === 'string' && /^[A-Za-z0-9_]{3,32}$/.test(username.trim());
 }
 
 async function readBody(request) {
@@ -75,7 +75,7 @@ async function currentUser(request, env) {
   const now = Math.floor(Date.now() / 1000);
   return (
     (await env.DB.prepare(
-      'SELECT u.id, u.email, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
+      'SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
     )
       .bind(token, now)
       .first()) || null
@@ -98,6 +98,47 @@ async function setSetting(env, key, value) {
   await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .bind(key, String(value))
     .run();
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 },
+    key,
+    256
+  );
+  return `pbkdf2$100000$${bytesToBase64(salt)}$${bytesToBase64(new Uint8Array(bits))}`;
+}
+
+async function verifyPassword(password, stored) {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
+  const iterations = Number(parts[1]);
+  if (!iterations) return false;
+  const salt = base64ToBytes(parts[2]);
+  const expected = base64ToBytes(parts[3]);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256)
+  );
+  if (bits.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < bits.length; i++) diff |= bits[i] ^ expected[i];
+  return diff === 0;
 }
 
 const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -173,45 +214,89 @@ async function handleCaptcha(request, env) {
   return json({ token, svg: captchaSvg(code) });
 }
 
-async function handleRegister(request, env) {
+async function handleInitAdmin(request, env) {
   const body = await readBody(request);
-  if (!body || !isValidEmail(body.email)) return json({ error: '请输入有效的邮箱地址。' }, 400);
-  const email = body.email.trim().toLowerCase();
-  const isInit = body.isInit === true;
+  const username = body && typeof body.username === 'string' ? body.username.trim() : '';
+  const password = body && typeof body.password === 'string' ? body.password : '';
 
-  if (isInit && (await getSetting(env, 'initialized')) === '1') {
+  if (!isValidUsername(username)) {
+    return json({ error: '管理员账号需为 3-32 位字母、数字或下划线。' }, 400);
+  }
+  if (password.length < 6 || password.length > 128) {
+    return json({ error: '密码长度需为 6-128 位。' }, 400);
+  }
+  if ((await getSetting(env, 'initialized')) === '1') {
     return json({ error: '管理员已初始化，无需重复操作。' }, 403);
   }
-  if (!isInit && (await getSetting(env, 'registration_enabled')) === '0') {
+  if (await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first()) {
+    return json({ error: '该用户名已被使用。' }, 400);
+  }
+
+  const hash = await hashPassword(password);
+  const result = await env.DB.prepare(
+    'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)'
+  )
+    .bind(username, hash, 'admin')
+    .run();
+  const userId = result.meta && result.meta.last_row_id;
+  if (!userId) return json({ error: '创建管理员失败。' }, 500);
+  await setSetting(env, 'initialized', '1');
+
+  const cookie = await createSession(env, request, userId);
+  return json({ ok: true, user: { id: userId, username, role: 'admin' } }, 200, { 'Set-Cookie': cookie });
+}
+
+async function handleRegister(request, env) {
+  const body = await readBody(request);
+  const username = body && typeof body.username === 'string' ? body.username.trim() : '';
+  const password = body && typeof body.password === 'string' ? body.password : '';
+
+  if (!isValidUsername(username)) {
+    return json({ error: '用户名需为 3-32 位字母、数字或下划线。' }, 400);
+  }
+  if (password.length < 6 || password.length > 128) {
+    return json({ error: '密码长度需为 6-128 位。' }, 400);
+  }
+  if ((await getSetting(env, 'registration_enabled')) === '0') {
     return json({ error: '当前已关闭用户注册。' }, 403);
   }
   if (!(await consumeCaptcha(env, body.captchaToken, body.captchaCode))) {
     return json({ error: '图片验证码错误或已过期。' }, 400);
   }
-  if (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) {
-    return json({ error: '该邮箱已注册。' }, 400);
+  if (await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first()) {
+    return json({ error: '该用户名已被注册。' }, 400);
   }
 
-  const role = isInit ? 'admin' : 'user';
-  const result = await env.DB.prepare('INSERT INTO users (email, role) VALUES (?, ?)').bind(email, role).run();
+  const hash = await hashPassword(password);
+  const result = await env.DB.prepare(
+    'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)'
+  )
+    .bind(username, hash, 'user')
+    .run();
   const userId = result.meta && result.meta.last_row_id;
   if (!userId) return json({ error: '创建用户失败。' }, 500);
-  if (isInit) await setSetting(env, 'initialized', '1');
 
   const cookie = await createSession(env, request, userId);
-  return json({ ok: true, user: { id: userId, email, role } }, 200, { 'Set-Cookie': cookie });
+  return json({ ok: true, user: { id: userId, username, role: 'user' } }, 200, { 'Set-Cookie': cookie });
 }
 
 async function handleLogin(request, env) {
   const body = await readBody(request);
-  if (!body || !isValidEmail(body.email)) return json({ error: '请输入有效的邮箱地址。' }, 400);
-  const email = body.email.trim().toLowerCase();
-  const user = await env.DB.prepare('SELECT id, email, role FROM users WHERE email = ?').bind(email).first();
-  if (!user) return json({ error: '该邮箱尚未注册。' }, 400);
-  if (!(await consumeCaptcha(env, body.captchaToken, body.captchaCode))) {
-    return json({ error: '图片验证码错误或已过期。' }, 400);
+  const username = body && typeof body.username === 'string' ? body.username.trim() : '';
+  const password = body && typeof body.password === 'string' ? body.password : '';
+  if (!username || !password) return json({ error: '请输入用户名和密码。' }, 400);
+
+  const user = await env.DB.prepare(
+    'SELECT id, username, password_hash, role FROM users WHERE username = ?'
+  )
+    .bind(username)
+    .first();
+  if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+    return json({ error: '用户名或密码错误。' }, 400);
   }
+
   const cookie = await createSession(env, request, user.id);
+  delete user.password_hash;
   return json({ ok: true, user }, 200, { 'Set-Cookie': cookie });
 }
 
@@ -224,7 +309,7 @@ async function handleLogout(request, env) {
 async function handleAdminUsers(request, env) {
   const auth = await requireAdmin(request, env);
   if (auth.error) return auth.error;
-  const result = await env.DB.prepare('SELECT id, email, role, created_at FROM users ORDER BY id').all();
+  const result = await env.DB.prepare('SELECT id, username, role, created_at FROM users ORDER BY id').all();
   return json({ users: result.results || [] });
 }
 
@@ -340,6 +425,7 @@ export default {
       if (!env.DB) return json({ error: '数据库未配置。' }, 500);
       try {
         if (url.pathname === '/auth/captcha' && request.method === 'GET') return await handleCaptcha(request, env);
+        if (url.pathname === '/auth/init' && request.method === 'POST') return await handleInitAdmin(request, env);
         if (url.pathname === '/auth/register' && request.method === 'POST') return await handleRegister(request, env);
         if (url.pathname === '/auth/login' && request.method === 'POST') return await handleLogin(request, env);
         if (url.pathname === '/auth/logout' && request.method === 'POST') return await handleLogout(request, env);

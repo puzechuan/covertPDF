@@ -16,17 +16,15 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:26px; box-shadow:0 10px 30px rgba(17,24,39,.05); }
   .notice { background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; border-radius:10px; padding:12px 14px; font-size:13px; margin-bottom:18px; }
   label { display:block; font-size:13px; color:var(--muted); margin:14px 0 6px; }
-  input[type=email], input[type=text] { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none; }
+  input { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none; }
   input:focus { border-color:var(--accent); box-shadow:0 0 0 2px #eef2ff; }
-  .captcha-row { display:flex; gap:8px; align-items:center; }
-  .captcha-row input { flex:1; }
-  .captcha-row img { width:150px; height:48px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:#f8fafc; }
   .hint { font-size:12px; color:var(--muted); margin-top:4px; }
   button { font-family:inherit; }
   .btn { border:0; background:var(--accent); color:#fff; font-weight:600; padding:10px 14px; border-radius:9px; cursor:pointer; font-size:14px; white-space:nowrap; }
   .btn:hover:not(:disabled) { background:#4338ca; }
   .btn:disabled { opacity:.55; cursor:wait; }
   .btn.block { width:100%; margin-top:20px; padding:11px; }
+  .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   .status { margin-top:14px; min-height:22px; font-size:13px; color:var(--muted); }
   .status.error { color:var(--danger); }
   .status.success { color:var(--ok); }
@@ -39,21 +37,19 @@
   <header><h1>PDF 工具箱</h1><a href="/">← 返回首页</a></header>
   <div class="card">
     <div id="initView">
-      <div class="notice"><strong>仅首次使用：</strong>在这里注册的账号会成为管理员，之后其他页面注册的均为普通用户。管理员账号只能初始化一次。</div>
-      <label for="email">管理员邮箱</label>
-      <input type="email" id="email" placeholder="name@example.com" autocomplete="email">
-      <label for="code">图片验证码</label>
-      <div class="captcha-row">
-        <input type="text" id="code" placeholder="请输入图中字符" autocomplete="off">
-        <img id="captchaImg" alt="点击更换验证码" title="点击更换验证码">
-      </div>
-      <div class="hint">不区分大小写；看不清可点击图片更换一张。</div>
+      <div class="notice"><strong>仅首次使用：</strong>创建管理员账号后，其他用户需在登录页用用户名注册。管理员账号只能初始化一次。</div>
+      <label for="username">管理员账号</label>
+      <input type="text" id="username" placeholder="3-32 位字母、数字或下划线" autocomplete="username">
+      <label for="password">密码</label>
+      <input type="password" id="password" placeholder="至少 6 位" autocomplete="new-password">
+      <label for="confirm">确认密码</label>
+      <input type="password" id="confirm" placeholder="再次输入密码" autocomplete="new-password">
       <button type="button" class="btn block" id="submitBtn">完成初始化</button>
       <div class="status" id="status"></div>
     </div>
     <div id="doneView" hidden style="text-align:center;padding:12px 0">
       <h2 style="font-size:18px;margin:0 0 8px">管理员已初始化</h2>
-      <p style="color:var(--muted);font-size:13px">无需再次初始化。请使用已注册账号登录。</p>
+      <p style="color:var(--muted);font-size:13px">无需再次初始化。请使用管理员账号密码登录。</p>
       <a class="btn" href="/login" style="margin-top:14px">前往登录</a>
     </div>
   </div>
@@ -64,12 +60,11 @@
   'use strict';
   var initView = document.getElementById('initView');
   var doneView = document.getElementById('doneView');
-  var emailEl = document.getElementById('email');
-  var codeEl = document.getElementById('code');
-  var captchaImg = document.getElementById('captchaImg');
+  var usernameEl = document.getElementById('username');
+  var passwordEl = document.getElementById('password');
+  var confirmEl = document.getElementById('confirm');
   var submitBtn = document.getElementById('submitBtn');
   var statusEl = document.getElementById('status');
-  var captchaToken = '';
 
   function setStatus(text, kind) {
     statusEl.textContent = text;
@@ -84,44 +79,32 @@
     return data;
   }
 
-  async function loadCaptcha() {
-    try {
-      var res = await api('/auth/captcha');
-      captchaToken = res.token;
-      captchaImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(res.svg);
-      codeEl.value = '';
-    } catch (e) { setStatus('加载验证码失败：' + e.message, 'error'); }
-  }
-
   async function load() {
     try {
       var settings = await api('/auth/settings');
       if (settings.initialized) {
         initView.hidden = true;
         doneView.hidden = false;
-        return;
       }
-      loadCaptcha();
     } catch (e) { setStatus(e.message, 'error'); }
   }
 
-  captchaImg.addEventListener('click', loadCaptcha);
-
   submitBtn.addEventListener('click', async function () {
-    var email = emailEl.value.trim();
-    var code = codeEl.value.trim();
-    if (!email || !code) { setStatus('请填写邮箱和图片验证码。', 'error'); return; }
+    var username = usernameEl.value.trim();
+    var password = passwordEl.value;
+    if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) { setStatus('管理员账号需为 3-32 位字母、数字或下划线。', 'error'); return; }
+    if (password.length < 6) { setStatus('密码至少 6 位。', 'error'); return; }
+    if (password !== confirmEl.value) { setStatus('两次输入的密码不一致。', 'error'); return; }
     submitBtn.disabled = true;
-    setStatus('正在验证并创建管理员…');
+    setStatus('正在创建管理员…');
     try {
-      await api('/auth/register', {
+      await api('/auth/init', {
         method: 'POST',
-        body: JSON.stringify({ email: email, captchaToken: captchaToken, captchaCode: code, isInit: true })
+        body: JSON.stringify({ username: username, password: password })
       });
       window.location.href = '/admin';
     } catch (e) {
       setStatus('初始化失败：' + e.message, 'error');
-      loadCaptcha();
       submitBtn.disabled = false;
     }
   });

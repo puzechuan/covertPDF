@@ -42,8 +42,8 @@
   <header><h1>用户管理</h1><a href="/">← 返回首页</a></header>
 
   <div class="card" id="loginCard" hidden>
-    <h2>需要登录</h2>
-    <p class="hint">请使用管理员账号登录后查看此页面。</p>
+    <h2>需要管理员登录</h2>
+    <p class="hint">请使用管理员用户名和密码登录后查看此页面。</p>
     <a class="btn" href="/login" style="margin-top:8px">前往登录</a>
   </div>
 
@@ -66,7 +66,7 @@
     <div class="card">
       <h2>已注册用户 <span class="hint" id="userCount"></span></h2>
       <table>
-        <thead><tr><th>邮箱</th><th>角色</th><th>注册时间</th></tr></thead>
+        <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th></tr></thead>
         <tbody id="userRows"></tbody>
       </table>
       <div class="hint" id="emptyUsers" hidden>暂无用户</div>
@@ -140,8 +140,9 @@
       emptyUsers.hidden = users.length > 0;
       users.forEach(function (u) {
         var tr = document.createElement('tr');
+        var name = u.username || '-';
         tr.innerHTML =
-          '<td>' + escapeHtml(u.email) + '</td>' +
+          '<td>' + escapeHtml(name) + '</td>' +
           '<td>' + (u.role === 'admin' ? '<span class="tag">管理员</span>' : '<span class="hint">普通用户</span>') + '</td>' +
           '<td>' + fmtDate(u.created_at) + '</td>';
         userRows.appendChild(tr);
