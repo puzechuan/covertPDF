@@ -351,6 +351,33 @@ async function handleLogin(request, env) {
   return json({ ok: true, user }, 200, { 'Set-Cookie': cookie });
 }
 
+async function handleChangePassword(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return json({ error: '请先登录。' }, 401);
+
+  const body = await readBody(request);
+  const currentPassword = body && typeof body.currentPassword === 'string' ? body.currentPassword : '';
+  const newPassword = body && typeof body.newPassword === 'string' ? body.newPassword : '';
+  if (!currentPassword || !newPassword) return json({ error: '请填写当前密码和新密码。' }, 400);
+  if (newPassword.length < 6 || newPassword.length > 128) {
+    return json({ error: '新密码长度需为 6-128 位。' }, 400);
+  }
+
+  const row = await env.DB.prepare('SELECT password_hash FROM users WHERE id = ?').bind(user.id).first();
+  if (!row || !row.password_hash || !(await verifyPassword(currentPassword, row.password_hash))) {
+    return json({ error: '当前密码错误。' }, 400);
+  }
+
+  const hash = await hashPassword(newPassword);
+  await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(hash, user.id).run();
+
+  const token = sessionToken(request);
+  if (token) {
+    await env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').bind(user.id, token).run();
+  }
+  return json({ ok: true });
+}
+
 async function handleLogout(request, env) {
   const token = sessionToken(request);
   if (token) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
@@ -485,6 +512,7 @@ export default {
         if (url.pathname === '/auth/init' && request.method === 'POST') return await handleInitAdmin(request, env);
         if (url.pathname === '/auth/register' && request.method === 'POST') return await handleRegister(request, env);
         if (url.pathname === '/auth/login' && request.method === 'POST') return await handleLogin(request, env);
+        if (url.pathname === '/auth/change-password' && request.method === 'POST') return await handleChangePassword(request, env);
         if (url.pathname === '/auth/logout' && request.method === 'POST') return await handleLogout(request, env);
         if (url.pathname === '/auth/me' && request.method === 'GET') {
           return json({ user: await currentUser(request, env) });

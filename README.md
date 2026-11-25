@@ -42,6 +42,7 @@
 - `/init`：首次访问时创建管理员账号（用户名 + 密码，只能初始化一次）。初始化完成后该页面关闭。
 - `/login`：所有用户统一使用用户名 + 密码登录；注册时额外需要图片验证码。不发送邮件。
 - `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
+- 首页、合并页、编辑页右上角有当前用户头像菜单：普通用户可修改密码、退出登录；管理员额外有「管理中心」入口。
 
 用户数据保存在 Cloudflare D1 数据库 `covertpdf-db`（Worker binding 名为 `DB`），表结构见根目录的 `init_covertpdf_db.sql`：
 
@@ -111,6 +112,7 @@ curl -X POST http://localhost:8787/merge \
 | `POST` | `/auth/init` | `{ username, password, adminKey }`，首次创建管理员账号（需注册验证密钥） |
 | `POST` | `/auth/register` | `{ username, password, captchaToken, captchaCode }`，注册普通用户 |
 | `POST` | `/auth/login` | `{ username, password }`，用户名密码登录 |
+| `POST` | `/auth/change-password` | `{ currentPassword, newPassword }`，修改当前用户密码 |
 | `POST` | `/auth/logout` | 退出登录并清除会话 |
 | `GET` | `/auth/me` | 返回当前登录用户，未登录返回 `{ user: null }` |
 | `GET` | `/auth/settings` | 返回 `{ registrationEnabled, initialized }` |
@@ -143,6 +145,7 @@ public/edit-pdf.html         编辑页面（内联 CSS/JS）
 public/login.html            登录 / 注册页面
 public/init.html             首次初始化管理员页面（路由 /init）
 public/admin.html            用户管理页面
+public/user-menu.js          首页 / 合并页 / 编辑页的右上角用户菜单与改密弹窗
 public/vendor/               pdf.js / pdf-lib 及字体资源（由 npm 包复制，无 CDN 依赖）
 init_covertpdf_db.sql        D1 初始化脚本（唯一的建表 SQL）
 public/favicon.svg           SVG 图标

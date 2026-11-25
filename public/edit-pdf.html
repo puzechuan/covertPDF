@@ -128,6 +128,7 @@
     <label class="btn" for="fileInput">打开 PDF</label>
     <input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
     <button type="button" class="btn primary" id="exportBtn" disabled>导出 PDF</button>
+    <span data-user-menu></span>
   </div>
 </header>
 
@@ -1002,5 +1003,6 @@
 <script>
 requireAuth().then(function (ok) { if (ok) document.body.classList.remove('auth-gate'); });
 </script>
+<script src="/user-menu.js"></script>
 </body>
 </html>
