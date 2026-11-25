@@ -61,11 +61,29 @@
     border: 1px dashed var(--line); border-radius: 10px;
     padding: 20px; text-align: center; color: #9ca3af; font-size: 14px;
   }
-  .file-item {
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
-    margin-bottom: 8px; background: #fff;
+  .file-card {
+    border: 1px solid var(--line); border-radius: 10px;
+    margin-bottom: 8px; background: #fff; overflow: hidden;
   }
+  .file-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+  .page-panel { border-top: 1px dashed var(--line); background: #fafaff; padding: 10px 12px 12px; }
+  .page-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .mini {
+    border: 1px solid var(--line); background: #fff; color: var(--muted);
+    padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  .mini:hover { border-color: var(--accent); color: var(--accent); }
+  .range-input {
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    font-size: 12px; width: 110px;
+  }
+  .pages { display: flex; flex-wrap: wrap; gap: 6px; }
+  .page-chip {
+    min-width: 30px; height: 28px; padding: 0 7px; border: 1px solid var(--line);
+    background: #fff; color: var(--muted); border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  .page-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .page-hint { font-size: 12px; color: var(--muted); }
   .idx {
     flex: 0 0 26px; height: 26px; border-radius: 50%;
     background: var(--accent-soft); color: var(--accent-dark);
@@ -135,7 +153,7 @@
         <path d="M12 18v-6"></path><path d="m9 15 3-3 3 3"></path>
       </svg>
       <strong>拖拽 PDF 到此处，或点击选择文件</strong>
-      <span>可多选，下方列表可调整合并顺序</span>
+      <span>可多选，展开文件可勾选要合并的页面（默认全选）</span>
     </div>
     <input type="file" id="fileInput" accept=".pdf,application/pdf" multiple>
 
@@ -157,7 +175,7 @@
     </div>
   </div>
 
-  <footer>单文件最大 40 MB · 总计最大 60 MB · 最多 30 个文件 · 不支持加密 PDF</footer>
+  <footer>默认合并全部页面，可展开文件单独选择 · 单文件最大 40 MB · 总计最大 60 MB · 最多 30 个文件 · 不支持加密 PDF</footer>
 </div>
 
 <script>
@@ -176,6 +194,12 @@
   var files = [];
   var objectUrl = null;
   var dragDepth = 0;
+  var busy = 0;
+  var merging = false;
+
+  function refreshButtons() {
+    mergeBtn.disabled = busy > 0 || merging;
+  }
 
   function fmt(n) {
     if (n < 1024) return n + ' B';
@@ -194,24 +218,62 @@
     statusEl.className = 'status ' + (kind || 'info');
   }
 
+  function selectedCount(file) {
+    return file.selected ? file.selected.size : (file.pageCount || 0);
+  }
+
   function render() {
     list.innerHTML = '';
     empty.hidden = files.length > 0;
     count.textContent = files.length + ' 个文件';
-    summary.textContent = '总大小 ' + fmt(files.reduce(function (n, f) { return n + f.size; }, 0));
+    var totalPages = files.reduce(function (n, f) { return n + selectedCount(f); }, 0);
+    summary.textContent = '总大小 ' + fmt(files.reduce(function (n, f) { return n + f.size; }, 0)) +
+      (files.length ? ' · 已选 ' + totalPages + ' 页' : '');
 
     files.forEach(function (file, i) {
       var li = document.createElement('li');
-      li.className = 'file-item';
-      li.innerHTML =
-        '<span class="idx">' + (i + 1) + '</span>' +
-        '<div class="meta"><div class="name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</div>' +
-        '<div class="size">' + fmt(file.size) + '</div></div>' +
-        '<div class="actions">' +
-          '<button type="button" class="icon" data-act="up" data-i="' + i + '" title="上移"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
-          '<button type="button" class="icon" data-act="down" data-i="' + i + '" title="下移"' + (i === files.length - 1 ? ' disabled' : '') + '>↓</button>' +
-          '<button type="button" class="icon remove" data-act="remove" data-i="' + i + '" title="移除">×</button>' +
+      li.className = 'file-card';
+      var expanded = !!file.expanded;
+      var pageInfo = file.pageCount === null ? '页数读取失败（按全部页合并）' :
+        (file.pageCount ? '共 ' + file.pageCount + ' 页 · 已选 ' + selectedCount(file) + ' 页' : '正在读取页数…');
+      var html =
+        '<div class="file-item">' +
+          '<span class="idx">' + (i + 1) + '</span>' +
+          '<div class="meta"><div class="name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</div>' +
+          '<div class="size">' + fmt(file.size) + ' · ' + pageInfo + '</div></div>' +
+          '<div class="actions">' +
+            '<button type="button" class="icon" data-act="toggle" data-i="' + i + '" title="选择页面">' + (expanded ? '▾' : '▸') + '</button>' +
+            '<button type="button" class="icon" data-act="up" data-i="' + i + '" title="上移"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
+            '<button type="button" class="icon" data-act="down" data-i="' + i + '" title="下移"' + (i === files.length - 1 ? ' disabled' : '') + '>↓</button>' +
+            '<button type="button" class="icon remove" data-act="remove" data-i="' + i + '" title="移除">×</button>' +
+          '</div>' +
         '</div>';
+
+      if (expanded) {
+        if (file.pageCount) {
+          var chips = '';
+          for (var p = 1; p <= file.pageCount; p++) {
+            chips += '<button type="button" class="page-chip' + ((file.selected && file.selected.has(p)) ? ' on' : '') +
+              '" data-act="page" data-i="' + i + '" data-p="' + p + '">' + p + '</button>';
+          }
+          html +=
+            '<div class="page-panel">' +
+              '<div class="page-tools">' +
+                '<button type="button" class="mini" data-act="all" data-i="' + i + '">全选</button>' +
+                '<button type="button" class="mini" data-act="none" data-i="' + i + '">全不选</button>' +
+                '<button type="button" class="mini" data-act="invert" data-i="' + i + '">反选</button>' +
+                '<input type="text" class="range-input" data-range="' + i + '" placeholder="如 1-3,5">' +
+                '<button type="button" class="mini" data-act="range" data-i="' + i + '">应用范围</button>' +
+                '<span class="page-hint">页码从 1 开始</span>' +
+              '</div>' +
+              '<div class="pages">' + chips + '</div>' +
+            '</div>';
+        } else {
+          html += '<div class="page-panel page-hint">' +
+            (file.pageCount === null ? '页数读取失败，将按全部页面合并。' : '正在读取页数…') + '</div>';
+        }
+      }
+      li.innerHTML = html;
       list.appendChild(li);
     });
   }
@@ -219,15 +281,52 @@
   function addFiles(fileList) {
     var added = 0;
     var skipped = 0;
+    var fresh = [];
     Array.prototype.forEach.call(fileList, function (file) {
-      if (!/.pdf$/i.test(file.name) && file.type !== 'application/pdf') { skipped++; return; }
+      if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { skipped++; return; }
+      file.expanded = false;
+      file.pageCount = undefined;
+      file.selected = null;
       files.push(file);
+      fresh.push(file);
       added++;
     });
-    if (added) setStatus('已添加 ' + added + ' 个文件。', 'info');
+    if (added) {
+      setStatus('已添加 ' + added + ' 个文件，正在读取页数…', 'info');
+      inspectFiles(fresh);
+    }
     if (skipped) setStatus('已跳过 ' + skipped + ' 个非 PDF 文件。', 'error');
     result.hidden = true;
     render();
+  }
+
+  async function inspectFiles(newFiles) {
+    if (!newFiles.length) return;
+    busy++;
+    refreshButtons();
+    var fd = new FormData();
+    newFiles.forEach(function (f) { fd.append('files', f, f.name); });
+    try {
+      var res = await fetch('/inspect', { method: 'POST', body: fd });
+      var data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error(data.error || ('读取页数失败（HTTP ' + res.status + '）'));
+      (data.files || []).forEach(function (info, i) {
+        var f = newFiles[i];
+        if (!f) return;
+        f.pageCount = info.pages;
+        f.selected = new Set();
+        for (var p = 1; p <= info.pages; p++) f.selected.add(p);
+      });
+      setStatus('已读取页数，展开文件可勾选要合并的页面（默认全选）。', 'info');
+    } catch (err) {
+      newFiles.forEach(function (f) { f.pageCount = null; f.selected = null; });
+      setStatus('页数读取失败：' + err.message + '（将按全部页面合并）', 'error');
+    } finally {
+      busy--;
+      refreshButtons();
+      render();
+    }
   }
 
   dropzone.addEventListener('click', function () { input.click(); });
@@ -247,14 +346,51 @@
     addFiles(e.dataTransfer.files);
   });
 
+  function parseRange(text, count) {
+    var out = new Set();
+    if (!text || !text.trim()) return out;
+    text.split(',').forEach(function (part) {
+      var m = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(part);
+      if (!m) return;
+      var a = parseInt(m[1], 10);
+      var b = m[2] ? parseInt(m[2], 10) : a;
+      if (b < a) { var t = a; a = b; b = t; }
+      for (var p = Math.max(1, a); p <= Math.min(count, b); p++) out.add(p);
+    });
+    return out;
+  }
+
   list.addEventListener('click', function (e) {
     var btn = e.target.closest('button[data-act]');
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
     var i = Number(btn.getAttribute('data-i'));
     var act = btn.getAttribute('data-act');
-    if (act === 'remove') files.splice(i, 1);
-    if (act === 'up' && i > 0) { var a = files[i - 1]; files[i - 1] = files[i]; files[i] = a; }
-    if (act === 'down' && i < files.length - 1) { var b = files[i + 1]; files[i + 1] = files[i]; files[i] = b; }
+    var file = files[i];
+    if (!file) return;
+
+    if (act === 'remove') { files.splice(i, 1); }
+    else if (act === 'up' && i > 0) { var a = files[i - 1]; files[i - 1] = files[i]; files[i] = a; }
+    else if (act === 'down' && i < files.length - 1) { var b = files[i + 1]; files[i + 1] = files[i]; files[i] = b; }
+    else if (act === 'toggle') { file.expanded = !file.expanded; }
+    else if (file.selected && file.pageCount) {
+      var p;
+      if (act === 'page') {
+        p = Number(btn.getAttribute('data-p'));
+        if (file.selected.has(p)) file.selected.delete(p); else file.selected.add(p);
+      } else if (act === 'all') {
+        for (p = 1; p <= file.pageCount; p++) file.selected.add(p);
+      } else if (act === 'none') {
+        file.selected.clear();
+      } else if (act === 'invert') {
+        var inverted = new Set();
+        for (p = 1; p <= file.pageCount; p++) if (!file.selected.has(p)) inverted.add(p);
+        file.selected = inverted;
+      } else if (act === 'range') {
+        var inputEl = list.querySelector('[data-range="' + i + '"]');
+        file.selected = parseRange(inputEl ? inputEl.value : '', file.pageCount);
+      }
+    }
+    result.hidden = true;
     render();
   });
 
@@ -267,11 +403,18 @@
 
   mergeBtn.addEventListener('click', async function () {
     if (!files.length) { setStatus('请先添加 PDF 文件。', 'error'); return; }
-    mergeBtn.disabled = true;
+    if (busy > 0 || merging) return;
+    merging = true;
+    refreshButtons();
     result.hidden = true;
     setStatus('正在上传并合并，请稍候…', 'info');
     var fd = new FormData();
     files.forEach(function (f) { fd.append('files', f, f.name); });
+    var selection = files.map(function (f) {
+      if (!f.selected) return null;
+      return Array.from(f.selected).map(function (p) { return p - 1; }).sort(function (a, b) { return a - b; });
+    });
+    fd.append('selection', JSON.stringify(selection));
     try {
       var res = await fetch('/merge', { method: 'POST', body: fd });
       if (!res.ok) {
@@ -294,7 +437,8 @@
     } catch (err) {
       setStatus('合并失败：' + err.message, 'error');
     } finally {
-      mergeBtn.disabled = false;
+      merging = false;
+      refreshButtons();
     }
   });
 

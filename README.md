@@ -5,7 +5,8 @@
 ## 功能
 
 - 网页端拖拽/多选上传，可调顺序、可移除
-- 按列表顺序合并所有页面的 PDF
+- 每个文件可展开选择部分页面（页码勾选、全选/反选、范围输入），默认全选
+- 按列表顺序合并所选页面
 - 服务端校验文件头（ `%PDF-` ）、数量与体积，拒绝加密 PDF
 - 合并结果以 `application/pdf` 直接下载，响应头带总页数
 - 独立的 `public/index.html`（内联 CSS/JS，无外部依赖）与 SVG/ICO favicon，由静态资源直接提供
@@ -33,14 +34,27 @@ npm run deploy
 
 由 `public/index.html` 静态资源直接提供上传页面（不经 Worker）；`GET /favicon.svg`、`GET /favicon.ico` 同理。
 
+### `POST /inspect`
+
+请求：`multipart/form-data`，文件字段名 `files`。返回 `{ "files": [{ "name": "...", "pages": 3 }] }`，供页面生成页码勾选框；文件只在内存中解析。
+
 ### `POST /merge`
 
 请求：`multipart/form-data`，文件字段名为 `files`，可重复提交多个文件；合并顺序即表单中的字段顺序。
+
+可选字段 `selection`：JSON 数组，与 `files` 等长；每项是 0 基页码数组（按给定顺序取页），或 `null` 表示该文件取全部页面。省略时按全部页面合并。
 
 ```bash
 curl -X POST http://localhost:8787/merge \
   -F "files=@a.pdf" \
   -F "files=@b.pdf" \
+  -o merged.pdf
+
+# 只取 a.pdf 的第 1、3 页和 b.pdf 的全部页面
+curl -X POST http://localhost:8787/merge \
+  -F "files=@a.pdf" \
+  -F "files=@b.pdf" \
+  -F 'selection=[[0,2],null]' \
   -o merged.pdf
 ```
 
