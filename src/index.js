@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
+import SCHEMA_SQL from '../init_covertpdf_db.sql';
 
 // Workers 单请求体上限 100MB、内存 128MB，这里留出解析与合并时的余量。
 const MAX_FILES = 30;
@@ -8,6 +9,33 @@ const MAX_TOTAL_BYTES = 60 * 1024 * 1024;
 const COOKIE_NAME = 'pdf_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const CODE_SECONDS = 5 * 60;
+
+let schemaReady = null;
+
+function schemaStatements() {
+  return SCHEMA_SQL
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n')
+    .split(';')
+    .map((sql) => sql.trim())
+    .filter(Boolean);
+}
+
+// 首次请求时自动建表；同一 isolate 内只执行一次，DDL 使用 IF NOT EXISTS 可安全并发。
+function ensureSchema(env) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      for (const sql of schemaStatements()) {
+        await env.DB.prepare(sql).run();
+      }
+    })().catch((error) => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  return schemaReady;
+}
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -433,6 +461,11 @@ export default {
 
     if (url.pathname === '/merge') {
       if (!env.DB) return json({ error: '数据库未配置。' }, 500);
+      try {
+        await ensureSchema(env);
+      } catch (error) {
+        return json({ error: `数据库初始化失败：${String(error?.message || error)}` }, 500);
+      }
       if (!(await currentUser(request, env))) {
         return json({ error: '请先登录后再使用合并功能。' }, 401);
       }
@@ -447,6 +480,7 @@ export default {
     if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/admin/')) {
       if (!env.DB) return json({ error: '数据库未配置。' }, 500);
       try {
+        await ensureSchema(env);
         if (url.pathname === '/auth/captcha' && request.method === 'GET') return await handleCaptcha(request, env);
         if (url.pathname === '/auth/init' && request.method === 'POST') return await handleInitAdmin(request, env);
         if (url.pathname === '/auth/register' && request.method === 'POST') return await handleRegister(request, env);

@@ -6,6 +6,12 @@ compatibility_date = "2025-06-01"
 [assets]
 directory = "./public/"
 
+# 让 Worker 以文本模块方式引入唯一的初始化 SQL
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "covertpdf-db"

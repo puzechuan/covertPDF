@@ -56,7 +56,9 @@
 
 管理员注册额外需要验证密钥：`wrangler.toml` 的 `[vars].ADMIN_REGISTER_KEY_HASH` 保存密钥的 SHA-256，`/init` 页面输入的密钥经 SHA-256 后与该值比对，错误则拒绝初始化。
 
-**数据库初始化**：
+**数据库初始化**：无需手动导入。Worker 首次收到 `/auth/*` 或 `/merge` 请求时会自动执行 `init_covertpdf_db.sql` 中的建表语句（`CREATE TABLE IF NOT EXISTS`，同一 isolate 内只执行一次），表结构会自动创建。
+
+`init_covertpdf_db.sql` 仍保留为唯一的 schema 源文件，Worker 通过文本模块直接引用；如需在本地或远端手动初始化，也可以执行：
 
 ```bash
 npx wrangler d1 execute covertpdf-db --local  --file=./init_covertpdf_db.sql
