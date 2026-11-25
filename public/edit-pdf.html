@@ -137,6 +137,7 @@
     <button type="button" class="tool" data-tool="highlight">高亮</button>
     <button type="button" class="tool" data-tool="rect">矩形</button>
     <button type="button" class="tool" data-tool="text">文字</button>
+    <button type="button" class="tool" data-tool="replace" title="点击 PDF 原有文字，输入新内容替换">改字</button>
     <button type="button" class="tool" data-tool="eraser">橡皮</button>
   </div>
   <div class="divider"></div>
@@ -247,6 +248,9 @@
     renderTask: null,
     baseVp: null,
     textPoint: null,
+    replaceTarget: null,
+    selection: null,
+    colorTouched: false,
     committing: false
   };
 
@@ -284,11 +288,16 @@
     Array.prototype.forEach.call(toolGroup.querySelectorAll('button'), function (b) {
       b.classList.toggle('active', b.dataset.tool === tool);
     });
+    if (tool === 'replace') {
+      state.colorTouched = false;
+      setStatus('改字：点击 PDF 上要修改的字/词，输入新内容后回车确认。默认沿用原文字颜色，可在上方改色。该页导出后会栅格化。');
+    }
     updateChrome();
   }
 
   function setColor(color) {
     state.color = color;
+    state.colorTouched = true;
     colorPicker.value = color;
     Array.prototype.forEach.call(document.querySelectorAll('.swatch'), function (b) {
       b.classList.toggle('active', b.dataset.color.toLowerCase() === color.toLowerCase());
@@ -338,6 +347,20 @@
       ctx.textBaseline = 'top';
       var lines = String(a.text).split('\n');
       for (var j = 0; j < lines.length; j++) ctx.fillText(lines[j], a.x * w, a.y * h + j * fs * 1.25);
+    } else if (a.type === 'replace') {
+      var bx = a.x * w, by = a.y * h, bw = a.w * w, bh = a.h * h;
+      ctx.fillStyle = a.bg || '#ffffff';
+      ctx.fillRect(bx, by, bw, bh);
+      var rfs = Math.max(5, a.fontNorm * w);
+      ctx.fillStyle = a.color;
+      ctx.font = rfs + 'px ' + FONT;
+      var measured = ctx.measureText(String(a.text)).width;
+      if (measured > bw && measured > 0) {
+        rfs = Math.max(5, rfs * (bw / measured) * 0.98);
+        ctx.font = rfs + 'px ' + FONT;
+      }
+      ctx.textBaseline = 'top';
+      ctx.fillText(String(a.text), bx, by + Math.max(0, (bh - rfs) / 2 - rfs * 0.08));
     }
     ctx.restore();
   }
@@ -355,6 +378,15 @@
     ctx.clearRect(0, 0, r.width, r.height);
     var items = state.pages[state.current].annotations.concat(state.draft ? [state.draft] : []);
     drawAll(ctx, items, r.width, r.height);
+    if (state.selection) {
+      var s = state.selection;
+      ctx.save();
+      ctx.strokeStyle = '#4f46e5';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(s.x * r.width, s.y * r.height, s.w * r.width, s.h * r.height);
+      ctx.restore();
+    }
   }
 
   async function renderCurrent() {
@@ -431,6 +463,7 @@
     if (i < 0 || i >= state.pages.length) return;
     state.current = i;
     state.draft = null;
+    if (!textEditor.hidden) closeTextEditor();
     updateChrome();
     Array.prototype.forEach.call(thumbs.children, function (el, idx) {
       el.classList.toggle('active', idx === i);
@@ -442,6 +475,7 @@
     var next = Math.round((state.scale + delta) * 10) / 10;
     state.scale = Math.max(0.4, Math.min(3, next));
     state.draft = null;
+    if (!textEditor.hidden) closeTextEditor();
     updateChrome();
     renderCurrent();
   }
@@ -456,6 +490,7 @@
       setStatus('文件超过 ' + fmt(MAX_FILE_BYTES) + '，请先拆分。', 'error');
       return;
     }
+    if (!textEditor.hidden) closeTextEditor();
     setStatus('正在打开 ' + file.name + ' …');
     try {
       pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.js';
@@ -473,7 +508,28 @@
       var bytes = new Uint8Array(await file.arrayBuffer());
       var pages = [];
       for (var i = 1; i <= pdf.numPages; i++) {
-        pages.push({ pdfPage: await pdf.getPage(i), sourceIndex: i, annotations: [] });
+        var pdfPage = await pdf.getPage(i);
+        var entry = { pdfPage: pdfPage, sourceIndex: i, annotations: [], textItems: [] };
+        try {
+          var tc = await pdfPage.getTextContent();
+          var vp1 = pdfPage.getViewport({ scale: 1 });
+          tc.items.forEach(function (it) {
+            if (!it.str || !it.str.trim() || !it.transform) return;
+            var tx = pdfjsLib.Util.transform(vp1.transform, it.transform);
+            var fontHeight = Math.hypot(tx[2], tx[3]);
+            var widthPx = Math.abs(it.width) * vp1.scale;
+            if (!fontHeight || fontHeight < 1 || !widthPx || widthPx < 0.5) return;
+            entry.textItems.push({
+              str: it.str,
+              x: tx[4] / vp1.width,
+              y: (tx[5] - fontHeight * 0.82) / vp1.height,
+              w: widthPx / vp1.width,
+              h: (fontHeight * 1.18) / vp1.height,
+              fontNorm: fontHeight / vp1.width
+            });
+          });
+        } catch (e) {}
+        pages.push(entry);
       }
       state.pdf = pdf;
       state.sourceBytes = bytes;
@@ -485,7 +541,9 @@
       updateChrome();
       await renderCurrent();
       renderThumbs();
-      setStatus('已打开 ' + file.name + '（' + pages.length + ' 页）。选择工具后即可标注。', 'success');
+      var textTotal = pages.reduce(function (n, p) { return n + p.textItems.length; }, 0);
+      setStatus('已打开 ' + file.name + '（' + pages.length + ' 页）。' +
+        (textTotal ? '检测到 ' + textTotal + ' 个文字块，可用「改字」替换。' : '未检测到文字层，无法改字（扫描件需先 OCR）。'), 'success');
     } catch (e) {
       setStatus('打开失败：' + (e && e.message || e), 'error');
     }
@@ -512,7 +570,10 @@
       return false;
     }
     var x1, y1, x2, y2;
-    if (a.type === 'text') {
+    if (a.type === 'replace') {
+      x1 = a.x * w; y1 = a.y * h;
+      x2 = (a.x + a.w) * w; y2 = (a.y + a.h) * h;
+    } else if (a.type === 'text') {
       var fs = a.size * w;
       x1 = a.x * w; y1 = a.y * h;
       x2 = x1 + Math.max(fs, String(a.text).length * fs * 0.75);
@@ -534,6 +595,134 @@
     }
   }
 
+  function findTextItem(p) {
+    var items = state.pages[state.current].textItems || [];
+    var best = null, bestDist = Infinity;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var x1 = it.x * p.w, y1 = it.y * p.h;
+      var x2 = (it.x + it.w) * p.w, y2 = (it.y + it.h) * p.h;
+      var cx = Math.max(x1, Math.min(p.px, x2));
+      var cy = Math.max(y1, Math.min(p.py, y2));
+      var d = Math.hypot(p.px - cx, p.py - cy);
+      if (d < bestDist) { bestDist = d; best = { item: it, index: i }; }
+    }
+    return bestDist <= Math.max(14, 12 * state.scale) ? best : null;
+  }
+
+  function sampleBackground(item) {
+    var r = drawCanvas.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var ctx = baseCanvas.getContext('2d');
+    var bx = item.x * r.width, by = (item.y + item.h / 2) * r.height;
+    var candidates = [
+      [bx - 2, by],
+      [bx + item.w * r.width + 2, by],
+      [bx + 2, item.y * r.height - 2],
+      [bx + 2, (item.y + item.h) * r.height + 2]
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var x = Math.round(candidates[i][0] * dpr), y = Math.round(candidates[i][1] * dpr);
+      if (x < 0 || y < 0 || x >= baseCanvas.width || y >= baseCanvas.height) continue;
+      try {
+        var d = ctx.getImageData(x, y, 1, 1).data;
+        return 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
+      } catch (e) {}
+    }
+    return '#ffffff';
+  }
+
+  function parseRGB(s) {
+    var m = /rgb\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)/.exec(s || '');
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (/^#[0-9a-f]{6}$/i.test(s || '')) {
+      return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
+    }
+    return [255, 255, 255];
+  }
+
+  function sampleTextColor(item, bg) {
+    var r = drawCanvas.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var x0 = Math.max(0, Math.floor(item.x * r.width * dpr));
+    var y0 = Math.max(0, Math.floor(item.y * r.height * dpr));
+    var x1 = Math.min(baseCanvas.width - 1, Math.ceil((item.x + item.w) * r.width * dpr));
+    var y1 = Math.min(baseCanvas.height - 1, Math.ceil((item.y + item.h) * r.height * dpr));
+    if (x1 <= x0 || y1 <= y0) return '#111827';
+    var back = parseRGB(bg);
+    try {
+      var data = baseCanvas.getContext('2d').getImageData(x0, y0, x1 - x0 + 1, y1 - y0 + 1).data;
+      var best = null, bestDist = -1;
+      for (var y = 0; y < y1 - y0 + 1; y += 2) {
+        for (var x = 0; x < x1 - x0 + 1; x += 2) {
+          var i = (y * (x1 - x0 + 1) + x) * 4;
+          var d = Math.abs(data[i] - back[0]) + Math.abs(data[i + 1] - back[1]) + Math.abs(data[i + 2] - back[2]);
+          if (d > bestDist) { bestDist = d; best = [data[i], data[i + 1], data[i + 2]]; }
+        }
+      }
+      if (best && bestDist > 30) return 'rgb(' + best[0] + ',' + best[1] + ',' + best[2] + ')';
+    } catch (e) {}
+    return '#111827';
+  }
+
+  function closeTextEditor() {
+    textEditor.hidden = true;
+    state.textPoint = null;
+    state.replaceTarget = null;
+    state.selection = null;
+    redrawOverlay();
+  }
+
+  function showReplaceEditor(p) {
+    var found = findTextItem(p);
+    if (!found) {
+      setStatus('这里没有识别到文字，请直接点击要改的字或词。', 'error');
+      return;
+    }
+    var anns = state.pages[state.current].annotations;
+    var existing = null;
+    for (var i = 0; i < anns.length; i++) {
+      if (anns[i].type === 'replace' && anns[i].sourceIndex === found.index) { existing = anns[i]; break; }
+    }
+    state.replaceTarget = { index: found.index, item: found.item, existing: existing };
+    state.selection = { x: found.item.x, y: found.item.y, w: found.item.w, h: found.item.h };
+    textEditor.hidden = false;
+    textEditor.style.left = (found.item.x * p.w) + 'px';
+    textEditor.style.top = ((found.item.y + found.item.h) * p.h + 2) + 'px';
+    textInput.value = existing ? existing.text : found.item.str;
+    textInput.style.fontSize = Math.max(12, found.item.fontNorm * p.w) + 'px';
+    var previewBg = existing ? existing.bg : sampleBackground(found.item);
+    textInput.style.color = state.colorTouched ? state.color :
+      (existing ? existing.color : sampleTextColor(found.item, previewBg));
+    setTimeout(function () { textInput.focus(); textInput.select(); }, 0);
+    redrawOverlay();
+  }
+
+  function commitReplace() {
+    if (state.committing || !state.replaceTarget) return;
+    state.committing = true;
+    var t = state.replaceTarget;
+    var value = textInput.value;
+    if (value.trim()) {
+      var bg = t.existing ? t.existing.bg : sampleBackground(t.item);
+      var textColor = state.colorTouched ? state.color :
+        (t.existing ? t.existing.color : sampleTextColor(t.item, bg));
+      var patch = {
+        type: 'replace', sourceIndex: t.index,
+        x: t.item.x, y: t.item.y, w: t.item.w, h: t.item.h,
+        fontNorm: t.item.fontNorm,
+        text: value, color: textColor,
+        bg: bg, original: t.item.str
+      };
+      if (t.existing) Object.assign(t.existing, patch);
+      else state.pages[state.current].annotations.push(patch);
+      refreshThumb(state.current);
+      setStatus('已替换「' + t.item.str + '」为「' + value + '」。点击「导出 PDF」保存。', 'success');
+    }
+    state.committing = false;
+    closeTextEditor();
+  }
+
   function showTextEditor(p) {
     state.textPoint = { x: p.x, y: p.y };
     textEditor.hidden = false;
@@ -546,7 +735,9 @@
   }
 
   function commitText() {
-    if (state.committing || textEditor.hidden) return;
+    if (textEditor.hidden) return;
+    if (state.replaceTarget) { commitReplace(); return; }
+    if (state.committing) return;
     state.committing = true;
     var value = textInput.value.trim();
     if (value && state.textPoint) {
@@ -557,10 +748,8 @@
       });
       refreshThumb(state.current);
     }
-    textEditor.hidden = true;
-    state.textPoint = null;
     state.committing = false;
-    redrawOverlay();
+    closeTextEditor();
   }
 
   drawCanvas.addEventListener('pointerdown', function (e) {
@@ -569,6 +758,7 @@
     e.preventDefault();
     var p = posOf(e);
     if (state.tool === 'text') { showTextEditor(p); return; }
+    if (state.tool === 'replace') { showReplaceEditor(p); return; }
     if (state.tool === 'eraser') { state.drawing = true; eraseAt(p); drawCanvas.setPointerCapture(e.pointerId); return; }
     var baseW = state.pages[state.current].pdfPage.getViewport({ scale: 1 }).width;
     if (state.tool === 'pen') {
@@ -612,7 +802,7 @@
   drawCanvas.addEventListener('pointercancel', endDraw);
   textInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); commitText(); }
-    if (e.key === 'Escape') { textEditor.hidden = true; state.textPoint = null; }
+    if (e.key === 'Escape') closeTextEditor();
   });
   textInput.addEventListener('blur', commitText);
 
@@ -653,6 +843,7 @@
 
   delPageBtn.addEventListener('click', function () {
     if (state.pages.length <= 1) { setStatus('至少保留一页。', 'error'); return; }
+    if (!textEditor.hidden) closeTextEditor();
     state.pages.splice(state.current, 1);
     if (state.current >= state.pages.length) state.current = state.pages.length - 1;
     updateChrome();
@@ -667,6 +858,7 @@
     e.stopPropagation();
     var i = Number(b.dataset.del);
     if (state.pages.length <= 1) { setStatus('至少保留一页。', 'error'); return; }
+    if (!textEditor.hidden) closeTextEditor();
     state.pages.splice(i, 1);
     if (state.current >= state.pages.length) state.current = state.pages.length - 1;
     else if (i < state.current) state.current--;
