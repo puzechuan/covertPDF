@@ -11,5 +11,8 @@ binding = "DB"
 database_name = "covertpdf-db"
 database_id = "9730b3ff-91e4-4dcc-b455-e661fbb92de6"
 
+[vars]
+ADMIN_REGISTER_KEY_HASH = "212a3f535ec9614784856611b7ca9126774d1fe26ea69cba2c94e28164448387"
+
 [observability]
 enabled = true

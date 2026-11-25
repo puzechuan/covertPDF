@@ -44,6 +44,8 @@
       <input type="password" id="password" placeholder="至少 6 位" autocomplete="new-password">
       <label for="confirm">确认密码</label>
       <input type="password" id="confirm" placeholder="再次输入密码" autocomplete="new-password">
+      <label for="adminKey">注册验证密钥</label>
+      <input type="password" id="adminKey" placeholder="管理员注册验证密钥" autocomplete="off">
       <button type="button" class="btn block" id="submitBtn">完成初始化</button>
       <div class="status" id="status"></div>
     </div>
@@ -63,6 +65,7 @@
   var usernameEl = document.getElementById('username');
   var passwordEl = document.getElementById('password');
   var confirmEl = document.getElementById('confirm');
+  var adminKeyEl = document.getElementById('adminKey');
   var submitBtn = document.getElementById('submitBtn');
   var statusEl = document.getElementById('status');
 
@@ -95,12 +98,13 @@
     if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) { setStatus('管理员账号需为 3-32 位字母、数字或下划线。', 'error'); return; }
     if (password.length < 6) { setStatus('密码至少 6 位。', 'error'); return; }
     if (password !== confirmEl.value) { setStatus('两次输入的密码不一致。', 'error'); return; }
+    if (!adminKeyEl.value) { setStatus('请输入管理员注册验证密钥。', 'error'); return; }
     submitBtn.disabled = true;
     setStatus('正在创建管理员…');
     try {
       await api('/auth/init', {
         method: 'POST',
-        body: JSON.stringify({ username: username, password: password })
+        body: JSON.stringify({ username: username, password: password, adminKey: adminKeyEl.value })
       });
       window.location.href = '/admin';
     } catch (e) {

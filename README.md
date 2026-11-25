@@ -54,6 +54,8 @@
 
 验证码由 Worker 生成 SVG 图片（带字符旋转与干扰线），无需邮件服务或第三方密钥。点击图片可更换一张。
 
+管理员注册额外需要验证密钥：`wrangler.toml` 的 `[vars].ADMIN_REGISTER_KEY_HASH` 保存密钥的 SHA-256，`/init` 页面输入的密钥经 SHA-256 后与该值比对，错误则拒绝初始化。
+
 **数据库初始化**：
 
 ```bash
@@ -104,7 +106,7 @@ curl -X POST http://localhost:8787/merge \
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/auth/captcha` | 返回 `{ token, svg }`，生成图片验证码 |
-| `POST` | `/auth/init` | `{ username, password }`，首次创建管理员账号 |
+| `POST` | `/auth/init` | `{ username, password, adminKey }`，首次创建管理员账号（需注册验证密钥） |
 | `POST` | `/auth/register` | `{ username, password, captchaToken, captchaCode }`，注册普通用户 |
 | `POST` | `/auth/login` | `{ username, password }`，用户名密码登录 |
 | `POST` | `/auth/logout` | 退出登录并清除会话 |

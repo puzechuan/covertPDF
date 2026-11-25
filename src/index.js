@@ -141,6 +141,22 @@ async function verifyPassword(password, stored) {
   return diff === 0;
 }
 
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function safeEqual(a, b) {
+  const left = String(a || '');
+  const right = String(b || '');
+  if (!left || !right || left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return diff === 0;
+}
+
 const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function randomInt(max) {
@@ -218,6 +234,7 @@ async function handleInitAdmin(request, env) {
   const body = await readBody(request);
   const username = body && typeof body.username === 'string' ? body.username.trim() : '';
   const password = body && typeof body.password === 'string' ? body.password : '';
+  const adminKey = body && typeof body.adminKey === 'string' ? body.adminKey : '';
 
   if (!isValidUsername(username)) {
     return json({ error: '管理员账号需为 3-32 位字母、数字或下划线。' }, 400);
@@ -227,6 +244,12 @@ async function handleInitAdmin(request, env) {
   }
   if ((await getSetting(env, 'initialized')) === '1') {
     return json({ error: '管理员已初始化，无需重复操作。' }, 403);
+  }
+  if (!env.ADMIN_REGISTER_KEY_HASH) {
+    return json({ error: '未配置管理员注册验证密钥。' }, 500);
+  }
+  if (!safeEqual(await sha256Hex(adminKey), env.ADMIN_REGISTER_KEY_HASH)) {
+    return json({ error: '管理员注册验证密钥错误。' }, 403);
   }
   if (await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first()) {
     return json({ error: '该用户名已被使用。' }, 400);
