@@ -43,7 +43,7 @@
 - `/login`：所有用户统一使用用户名 + 密码登录；注册时额外需要图片验证码。不发送邮件。
 - `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
 
-用户数据保存在 Cloudflare D1 数据库 `covert-pdf-users`（Worker binding 名为 `DB`），表结构见 `migrations/`：
+用户数据保存在 Cloudflare D1 数据库 `covertpdf-db`（Worker binding 名为 `DB`），表结构见根目录的 `init_covertpdf_db.sql`：
 
 | 表 | 用途 |
 | --- | --- |
@@ -54,11 +54,11 @@
 
 验证码由 Worker 生成 SVG 图片（带字符旋转与干扰线），无需邮件服务或第三方密钥。点击图片可更换一张。
 
-**数据库迁移**：
+**数据库初始化**：
 
 ```bash
-npx wrangler d1 migrations apply covert-pdf-users --local
-npx wrangler d1 migrations apply covert-pdf-users --remote
+npx wrangler d1 execute covertpdf-db --local  --file=./init_covertpdf_db.sql
+npx wrangler d1 execute covertpdf-db --remote --file=./init_covertpdf_db.sql
 ```
 
 ## 快速开始
@@ -140,7 +140,7 @@ public/login.html            登录 / 注册页面
 public/init.html             首次初始化管理员页面（路由 /init）
 public/admin.html            用户管理页面
 public/vendor/               pdf.js / pdf-lib 及字体资源（由 npm 包复制，无 CDN 依赖）
-migrations/                  D1 表结构迁移
+init_covertpdf_db.sql        D1 初始化脚本（唯一的建表 SQL）
 public/favicon.svg           SVG 图标
 public/favicon.ico           ICO 图标（16px / 32px）
 wrangler.toml                Worker 配置（assets.directory = "./public/"）

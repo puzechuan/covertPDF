@@ -8,9 +8,8 @@ directory = "./public/"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "covert-pdf-users"
-database_id = "5f7c67de-46e8-401d-9114-e62f442be7d9"
-migrations_dir = "migrations"
+database_name = "covertpdf-db"
+database_id = "9730b3ff-91e4-4dcc-b455-e661fbb92de6"
 
 [observability]
 enabled = true
