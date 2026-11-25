@@ -123,7 +123,7 @@ export const PAGE_HTML = `<!doctype html>
 <body>
 <div class="wrap">
   <header>
-    <h1>PDF 合并</h1>
+    <h1>PDF合并</h1>
   </header>
 
   <div class="card">
