@@ -1,0 +1,19 @@
+{
+  "name": "covert-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A Cloudflare Worker that merges multiple PDF files into one.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir dist"
+  },
+  "dependencies": {
+    "covert-pdf": "file:",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.168.0"
+  }
+}
