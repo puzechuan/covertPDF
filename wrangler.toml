@@ -1,6 +1,6 @@
 name = "covert-pdf"
 main = "src/index.js"
-compatibility_date = "2025-06-01"
+compatibility_date = "2026-11-26"
 
 # 页面与图标由静态资源直接提供，Worker 只处理 /merge 与 /health。
 [assets]
