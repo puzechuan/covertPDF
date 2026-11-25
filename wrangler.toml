@@ -15,7 +15,6 @@ fallthrough = true
 [[d1_databases]]
 binding = "DB"
 database_name = "covertpdf-db"
-database_id = "9730b3ff-91e4-4dcc-b455-e661fbb92de6"
 
 [vars]
 
