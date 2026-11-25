@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 / 注册 - PDF 工具箱</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280; --accent:#4f46e5; --danger:#dc2626; --ok:#059669; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.6; }
+  .wrap { max-width:460px; margin:0 auto; padding:48px 18px 30px; }
+  header { text-align:center; margin-bottom:22px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  header a { color:var(--accent); text-decoration:none; font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:26px; box-shadow:0 10px 30px rgba(17,24,39,.05); }
+  .tabs { display:flex; gap:8px; margin-bottom:20px; }
+  .tab { flex:1; border:1px solid var(--line); background:#fff; color:var(--muted); padding:9px; border-radius:9px; cursor:pointer; font-size:14px; }
+  .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  label { display:block; font-size:13px; color:var(--muted); margin:14px 0 6px; }
+  input[type=email], input[type=text] { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none; }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 2px #eef2ff; }
+  .code-row { display:flex; gap:8px; }
+  .code-row input { flex:1; }
+  button { font-family:inherit; }
+  .btn { border:0; background:var(--accent); color:#fff; font-weight:600; padding:10px 14px; border-radius:9px; cursor:pointer; font-size:14px; white-space:nowrap; }
+  .btn:hover:not(:disabled) { background:#4338ca; }
+  .btn:disabled { opacity:.55; cursor:wait; }
+  .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  .btn.block { width:100%; margin-top:20px; padding:11px; }
+  .status { margin-top:14px; min-height:22px; font-size:13px; color:var(--muted); }
+  .status.error { color:var(--danger); }
+  .status.success { color:var(--ok); }
+  .devcode { margin-top:8px; padding:8px 10px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:13px; word-break:break-all; }
+  .signed { text-align:center; padding:10px 0; }
+  .signed h2 { font-size:18px; margin:0 0 6px; }
+  .signed p { color:var(--muted); font-size:13px; word-break:break-all; }
+  .signed .links { display:flex; gap:10px; justify-content:center; margin-top:18px; }
+  a.btn { display:inline-block; text-decoration:none; text-align:center; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>PDF 工具箱</h1><a href="/">← 返回首页</a></header>
+  <div class="card">
+    <div id="authView">
+      <div class="tabs">
+        <button type="button" class="tab active" data-mode="login">登录</button>
+        <button type="button" class="tab" data-mode="register">注册</button>
+      </div>
+      <label for="email">邮箱</label>
+      <input type="email" id="email" placeholder="name@example.com" autocomplete="email">
+      <label for="code">验证码</label>
+      <div class="code-row">
+        <input type="text" id="code" placeholder="邮件中的验证码" autocomplete="one-time-code">
+        <button type="button" class="btn ghost" id="sendBtn">获取验证码</button>
+      </div>
+      <button type="button" class="btn block" id="submitBtn">登录</button>
+      <div class="status" id="status"></div>
+      <div class="devcode" id="devCode" hidden></div>
+    </div>
+    <div class="signed" id="signedView" hidden>
+      <h2>已登录</h2>
+      <p id="signedEmail"></p>
+      <div class="links">
+        <a class="btn ghost" href="/">返回首页</a>
+        <a class="btn ghost" href="/admin">用户管理</a>
+      </div>
+      <button type="button" class="btn block" id="signOutBtn" style="background:#fff;color:var(--muted);border:1px solid var(--line)">退出登录</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var emailEl = document.getElementById('email');
+  var codeEl = document.getElementById('code');
+  var sendBtn = document.getElementById('sendBtn');
+  var submitBtn = document.getElementById('submitBtn');
+  var statusEl = document.getElementById('status');
+  var devCodeEl = document.getElementById('devCode');
+  var authView = document.getElementById('authView');
+  var signedView = document.getElementById('signedView');
+  var signedEmail = document.getElementById('signedEmail');
+  var signOutBtn = document.getElementById('signOutBtn');
+  var mode = 'login';
+  var settings = { registrationEnabled: true, initialized: true };
+  var sentEmail = '';
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  async function api(path, options) {
+    var res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {}));
+    var data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.error || ('请求失败（HTTP ' + res.status + '）'));
+    return data;
+  }
+
+  function showSigned(user) {
+    authView.hidden = true;
+    signedView.hidden = false;
+    signedEmail.textContent = user.email || '已登录账号';
+  }
+
+  async function load() {
+    try {
+      settings = await api('/auth/settings');
+      if (!settings.initialized) setStatus('系统尚未初始化管理员，请先访问 /init 完成初始化。', 'error');
+      var me = await api('/auth/me');
+      if (me.user) showSigned(me.user);
+    } catch (e) { setStatus(e.message, 'error'); }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (tab) {
+    tab.addEventListener('click', function () {
+      mode = tab.dataset.mode;
+      Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) { t.classList.toggle('active', t === tab); });
+      submitBtn.textContent = mode === 'login' ? '登录' : '注册';
+      codeEl.value = '';
+      sentEmail = '';
+      devCodeEl.hidden = true;
+      setStatus('');
+    });
+  });
+
+  sendBtn.addEventListener('click', async function () {
+    var email = emailEl.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('请输入有效的邮箱地址。', 'error'); return; }
+    if (mode === 'register' && !settings.registrationEnabled) { setStatus('当前已关闭用户注册。', 'error'); return; }
+    sendBtn.disabled = true;
+    setStatus('正在发送验证码…');
+    try {
+      var res = await api('/auth/send-code', {
+        method: 'POST',
+        body: JSON.stringify({ email: email, purpose: mode })
+      });
+      sentEmail = email;
+      if (res.devCode) {
+        devCodeEl.hidden = false;
+        devCodeEl.textContent = '开发模式验证码：' + res.devCode + '（未配置邮件服务时仅在本地返回）';
+      }
+      setStatus('验证码已发送到该邮箱，请查收。', 'success');
+    } catch (e) { setStatus('发送失败：' + e.message, 'error'); }
+    sendBtn.disabled = false;
+  });
+
+  submitBtn.addEventListener('click', async function () {
+    var email = emailEl.value.trim();
+    var code = codeEl.value.trim();
+    if (!email || !code) { setStatus('请填写邮箱和验证码。', 'error'); return; }
+    if (sentEmail !== email) { setStatus('请先获取当前邮箱的验证码。', 'error'); return; }
+    if (mode === 'register' && !settings.registrationEnabled) { setStatus('当前已关闭用户注册。', 'error'); return; }
+    submitBtn.disabled = true;
+    setStatus('正在验证…');
+    try {
+      var res = await api(mode === 'login' ? '/auth/login' : '/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email: email, code: code })
+      });
+      showSigned(res.user);
+    } catch (e) { setStatus('验证失败：' + e.message, 'error'); }
+    submitBtn.disabled = false;
+  });
+
+  signOutBtn.addEventListener('click', async function () {
+    try { await api('/auth/logout', { method: 'POST' }); } catch (e) {}
+    signedView.hidden = true;
+    authView.hidden = false;
+    setStatus('已退出登录。', 'success');
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

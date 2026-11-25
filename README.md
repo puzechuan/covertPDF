@@ -1,6 +1,6 @@
 # PDF 工具箱（Cloudflare Worker）
 
-基于 Cloudflare Workers + `pdf-lib` 的 PDF 合并服务，并提供一个完全在浏览器内运行的 PDF 标注编辑器。文件不写数据库、不落盘、不做持久化存储。
+基于 Cloudflare Workers + `pdf-lib` 的 PDF 工具箱，提供 PDF 合并与浏览器内标注编辑。PDF 文件本身不写数据库、不落盘；用户账号信息保存在云服务数据库中。
 
 ## 页面
 
@@ -9,6 +9,9 @@
 | `/` | 主页面（`public/index.html`），选择「PDF 合并」或「PDF 编辑」 |
 | `/merge-pdf.html` | 多文件合并页面 |
 | `/edit-pdf.html` | 在线编辑页面 |
+| `/init` | 首次初始化管理员（在该页注册的账号成为管理员，仅一次） |
+| `/login` | 邮箱验证码登录 / 注册 |
+| `/admin` | 用户管理：注册开关与已注册用户列表 |
 
 两个页面导出时都会弹出系统「另存为」窗口（Chrome / Edge 等支持 File System Access API 的浏览器），可直接在资源管理器里选择保存位置并修改文件名；取消则不会生成文件。Safari / Firefox 等不支持该 API 的浏览器会回退到普通下载，使用带时间戳的默认文件名。
 
@@ -31,6 +34,34 @@
 - 全程在浏览器内处理，文件不上传到服务器
 
 > 说明：PDF 内的文字不是可编辑对象，改字只能“遮盖原文字 + 重绘新文字”。带修改的页面会以约 144 DPI 合成，导出后该页文字不再可选中；未修改的页面不受影响。扫描件没有文字层，需先 OCR 才能改字。
+
+### 用户系统（Cloudflare D1）
+
+- `/init`：首次访问时用邮箱验证码注册管理员。初始化完成后该页面关闭，后续注册的用户都是普通用户。
+- `/login`：邮箱验证码登录或注册。登录和注册都只需邮箱 + 验证码，没有密码。
+- `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
+
+用户数据保存在 Cloudflare D1 数据库 `covert-pdf-users`（Worker binding 名为 `DB`），表结构见 `migrations/0001_user_system.sql`：
+
+| 表 | 用途 |
+| --- | --- |
+| `users` | 用户邮箱、角色（admin / user）、注册时间 |
+| `verification_codes` | 邮箱验证码，5 分钟有效，使用后置为已用 |
+| `sessions` | 登录会话 token，7 天有效，通过 HttpOnly Cookie 传递 |
+| `settings` | `registration_enabled` 注册开关与 `initialized` 初始化状态 |
+
+**邮件发送**：配置 `RESEND_API_KEY` 密钥后会通过 Resend 发送真实验证码邮件，发件地址由 `EMAIL_FROM` 变量控制（需为已验证域名）。未配置密钥时，本地开发会在页面上直接显示验证码，方便自测；部署前务必配置密钥，否则验证码会公开返回。
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+```
+
+**数据库迁移**：
+
+```bash
+npx wrangler d1 migrations apply covert-pdf-users --local
+npx wrangler d1 migrations apply covert-pdf-users --remote
+```
 
 ## 快速开始
 
@@ -70,9 +101,22 @@ curl -X POST http://localhost:8787/merge \
 
 失败响应：JSON，形如 `{ "error": "具体原因" }`，状态码 `400` / `405` / `500`。
 
+### 用户系统 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/auth/send-code` | `{ email, purpose }`，purpose 为 `login` / `register` / `init`，发送验证码 |
+| `POST` | `/auth/register` | `{ email, code, isInit? }`，注册用户或初始化管理员 |
+| `POST` | `/auth/login` | `{ email, code }`，验证码登录 |
+| `POST` | `/auth/logout` | 退出登录并清除会话 |
+| `GET` | `/auth/me` | 返回当前登录用户，未登录返回 `{ user: null }` |
+| `GET` | `/auth/settings` | 返回 `{ registrationEnabled, initialized }` |
+| `GET` | `/admin/users` | 管理员获取用户列表 |
+| `POST` | `/admin/registration` | 管理员设置 `{ enabled }` 注册开关 |
+
 ### `GET /health`
 
-健康检查，返回 `{ "ok": true, "service": "covert-pdf" }`。
+健康检查，返回 `{ "ok": true, "service": "covert-pdf", "db": true }`。
 
 ## 限制
 
@@ -89,11 +133,15 @@ Cloudflare Workers 免费版请求体上限为 100 MB、内存约 128 MB，合�
 ## 目录结构
 
 ```
-src/index.js                 Worker 入口：/merge 与 /health、校验、合并、响应
+src/index.js                 Worker 入口：/merge、用户系统 API、/health、校验与合并
 public/index.html            主页面（内联 CSS/JS）
 public/merge-pdf.html        合并页面（内联 CSS/JS）
 public/edit-pdf.html         编辑页面（内联 CSS/JS）
+public/login.html            登录 / 注册页面
+public/init.html             首次初始化管理员页面（路由 /init）
+public/admin.html            用户管理页面
 public/vendor/               pdf.js / pdf-lib 及字体资源（由 npm 包复制，无 CDN 依赖）
+migrations/                  D1 表结构迁移
 public/favicon.svg           SVG 图标
 public/favicon.ico           ICO 图标（16px / 32px）
 wrangler.toml                Worker 配置（assets.directory = "./public/"）

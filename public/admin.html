@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用户管理 - PDF 工具箱</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280; --accent:#4f46e5; --danger:#dc2626; --ok:#059669; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; padding:44px 18px 30px; }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+  h1 { font-size:24px; margin:0; }
+  header a { color:var(--accent); text-decoration:none; font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; box-shadow:0 10px 30px rgba(17,24,39,.05); margin-bottom:18px; }
+  .card h2 { font-size:17px; margin:0 0 14px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; }
+  .hint { color:var(--muted); font-size:13px; }
+  .switch { position:relative; width:52px; height:30px; flex:0 0 auto; }
+  .switch input { opacity:0; width:0; height:0; }
+  .slider { position:absolute; inset:0; background:#cbd5e1; border-radius:999px; cursor:pointer; transition:.2s; }
+  .slider:before { content:""; position:absolute; width:24px; height:24px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .switch input:checked + .slider { background:var(--accent); }
+  .switch input:checked + .slider:before { transform:translateX(22px); }
+  .switch input:disabled + .slider { opacity:.5; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#4338ca; font-size:11px; }
+  .status { min-height:22px; font-size:13px; color:var(--muted); margin-top:12px; }
+  .status.error { color:var(--danger); }
+  .status.success { color:var(--ok); }
+  .btn { border:1px solid var(--line); background:#fff; color:var(--muted); padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .btn:hover { color:var(--accent); border-color:var(--accent); }
+  a.btn { display:inline-block; text-decoration:none; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>用户管理</h1><a href="/">← 返回首页</a></header>
+
+  <div class="card" id="loginCard" hidden>
+    <h2>需要登录</h2>
+    <p class="hint">请使用管理员账号登录后查看此页面。</p>
+    <a class="btn" href="/login" style="margin-top:8px">前往登录</a>
+  </div>
+
+  <div id="adminView" hidden>
+    <div class="card">
+      <h2>注册开关</h2>
+      <div class="row">
+        <div>
+          <div style="font-weight:600">允许用户注册</div>
+          <div class="hint">关闭后新用户无法注册；已注册用户仍可正常登录，账号数据不受影响。</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="regToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>已注册用户 <span class="hint" id="userCount"></span></h2>
+      <table>
+        <thead><tr><th>邮箱</th><th>角色</th><th>注册时间</th></tr></thead>
+        <tbody id="userRows"></tbody>
+      </table>
+      <div class="hint" id="emptyUsers" hidden>暂无用户</div>
+    </div>
+
+    <button type="button" class="btn" id="signOutBtn">退出登录</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var loginCard = document.getElementById('loginCard');
+  var adminView = document.getElementById('adminView');
+  var regToggle = document.getElementById('regToggle');
+  var statusEl = document.getElementById('status');
+  var userRows = document.getElementById('userRows');
+  var userCount = document.getElementById('userCount');
+  var emptyUsers = document.getElementById('emptyUsers');
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  async function api(path, options) {
+    var res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {}));
+    var data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.error || ('请求失败（HTTP ' + res.status + '）'));
+    return data;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtDate(s) {
+    if (!s) return '-';
+    return String(s).replace('T', ' ').slice(0, 16);
+  }
+
+  async function load() {
+    try {
+      var me = await api('/auth/me');
+      if (!me.user) { loginCard.hidden = false; return; }
+      if (me.user.role !== 'admin') {
+        loginCard.hidden = false;
+        loginCard.querySelector('h2').textContent = '需要管理员权限';
+        return;
+      }
+      adminView.hidden = false;
+      var settings = await api('/auth/settings');
+      regToggle.checked = !!settings.registrationEnabled;
+      await loadUsers();
+    } catch (e) { setStatus(e.message, 'error'); }
+  }
+
+  async function loadUsers() {
+    try {
+      var res = await api('/admin/users');
+      var users = res.users || [];
+      userRows.innerHTML = '';
+      userCount.textContent = '共 ' + users.length + ' 人';
+      emptyUsers.hidden = users.length > 0;
+      users.forEach(function (u) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(u.email) + '</td>' +
+          '<td>' + (u.role === 'admin' ? '<span class="tag">管理员</span>' : '<span class="hint">普通用户</span>') + '</td>' +
+          '<td>' + fmtDate(u.created_at) + '</td>';
+        userRows.appendChild(tr);
+      });
+    } catch (e) { setStatus('读取用户列表失败：' + e.message, 'error'); }
+  }
+
+  regToggle.addEventListener('change', async function () {
+    var next = regToggle.checked;
+    regToggle.disabled = true;
+    setStatus('正在保存…');
+    try {
+      await api('/admin/registration', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: next })
+      });
+      setStatus(next ? '已开启用户注册。' : '已关闭用户注册，现有账号不受影响。', 'success');
+    } catch (e) {
+      regToggle.checked = !next;
+      setStatus('保存失败：' + e.message, 'error');
+    }
+    regToggle.disabled = false;
+  });
+
+  document.getElementById('signOutBtn').addEventListener('click', async function () {
+    try { await api('/auth/logout', { method: 'POST' }); } catch (e) {}
+    window.location.href = '/login';
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
