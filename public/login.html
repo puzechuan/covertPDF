@@ -39,6 +39,8 @@
   a.btn { display:inline-block; text-decoration:none; text-align:center; }
   .btn.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   [hidden] { display:none !important; }
+  /* 设置读取完成前先不显示卡片，避免「注册」标签闪一下又消失 */
+  body:not(.ready) .card { visibility:hidden; }
 </style>
 </head>
 <body>
@@ -46,9 +48,9 @@
   <header><h1>PDF 工具箱</h1><a href="/">← 返回首页</a></header>
   <div class="card">
     <div id="authView">
-      <div class="tabs">
+      <div class="tabs" id="authTabs">
         <button type="button" class="tab active" data-mode="login">登录</button>
-        <button type="button" class="tab" data-mode="register">注册</button>
+        <button type="button" class="tab" data-mode="register" id="registerTab">注册</button>
       </div>
 
       <label for="username">用户名</label>
@@ -98,6 +100,8 @@
   var signedName = document.getElementById('signedName');
   var adminLink = document.getElementById('adminLink');
   var signOutBtn = document.getElementById('signOutBtn');
+  var tabsEl = document.getElementById('authTabs');
+  var registerTab = document.getElementById('registerTab');
   var mode = 'login';
   var settings = { registrationEnabled: true, initialized: true };
   var captchaToken = '';
@@ -135,6 +139,16 @@
     if (mode === 'register') loadCaptcha();
   }
 
+  // 管理员关闭注册后，直接不显示注册入口（整排 tab 一起去掉）
+  function applyRegistration(enabled) {
+    var on = !!enabled;
+    tabsEl.hidden = !on;
+    registerTab.hidden = !on;
+    if (!on && mode !== 'login') setMode('login');
+    document.title = (on ? '登录 / 注册' : '登录') + ' - PDF 工具箱';
+    document.body.classList.add('ready');
+  }
+
   function showSigned(user) {
     authView.hidden = true;
     signedView.hidden = false;
@@ -149,9 +163,15 @@
         window.location.replace('/init');
         return;
       }
+      applyRegistration(settings.registrationEnabled);
       var me = await api('/auth/me');
       if (me.user) showSigned(me.user);
-    } catch (e) { setStatus(e.message, 'error'); }
+    } catch (e) {
+      setStatus(e.message, 'error');
+    } finally {
+      // 无论成功失败都让卡片可见，避免设置接口异常时页面空白
+      document.body.classList.add('ready');
+    }
   }
 
   captchaImg.addEventListener('click', loadCaptcha);
