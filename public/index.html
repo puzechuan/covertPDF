@@ -34,7 +34,7 @@
   }
   h1 { font-size: 34px; margin: 0 0 8px; letter-spacing: -0.5px; }
   header p { margin: 0; color: var(--muted); font-size: 15px; }
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
   .tool {
     background: var(--card); border: 1px solid var(--line); border-radius: 16px;
     padding: 28px; box-shadow: 0 10px 30px rgba(17, 24, 39, 0.05);
@@ -72,10 +72,29 @@
 <div class="wrap">
   <header>
     <h1>PDF工具箱</h1>
-    <p>合并与编辑 PDF，打开文件即可开始</p>
+    <p>转换、合并与编辑 PDF，打开文件即可开始</p>
   </header>
 
   <div class="grid">
+    <section class="tool">
+      <div class="tool-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <path d="M14 2v6h6"></path>
+          <path d="M8.5 12.5 10 18l2-4 2 4 1.5-5.5"></path>
+        </svg>
+      </div>
+      <h2>Word 转 PDF</h2>
+      <p>把 .docx 文档转成 PDF，版式尽量按原样保留。</p>
+      <ul>
+        <li>拖拽或点击选择 .docx 文件</li>
+        <li>保留中文、表格、图片与页眉页脚</li>
+        <li>自动分页，不会把一行字切成两半</li>
+        <li>浏览器内转换，文件不上传</li>
+      </ul>
+      <a class="btn" href="/word-to-pdf">开始转换 →</a>
+    </section>
+
     <section class="tool">
       <div class="tool-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -113,7 +132,7 @@
     </section>
   </div>
 
-  <div class="note">合并与编辑都在本机浏览器完成，文件不会上传；关闭页面后内容不会保留</div>
+  <div class="note">转换、合并与编辑都在本机浏览器完成，文件不会上传；关闭页面后内容不会保留</div>
 </div>
 <script src="/gate.js"></script>
 <script>

@@ -1,21 +1,35 @@
 # PDF 工具箱（Cloudflare Worker）
 
-基于 Cloudflare Workers + `pdf-lib` 的 PDF 工具箱：PDF 合并在浏览器内完成（文件不上传），PDF 标注编辑同样在浏览器内完成。PDF 文件本身不写数据库、不落盘；用户账号信息保存在云服务数据库中。
+基于 Cloudflare Workers + `pdf-lib` 的 PDF 工具箱：Word 转 PDF、PDF 合并在浏览器内完成（文件不上传），PDF 标注编辑同样在浏览器内完成。PDF / Word 文件本身不写数据库、不落盘；用户账号信息保存在云服务数据库中。
 
 ## 页面
 
 | 页面 | 说明 |
 | --- | --- |
-| `/` | 主页面（`public/index.html`），选择「PDF 合并」或「PDF 编辑」 |
+| `/` | 主页面（`public/index.html`），选择「Word 转 PDF」「PDF 合并」或「PDF 编辑」 |
 | `/merge-pdf.html` | 多文件合并页面 |
 | `/edit-pdf.html` | 在线编辑页面 |
+| `/word-to-pdf.html` | Word 转 PDF 页面 |
 | `/init` | 首次初始化管理员（在该页注册的账号成为管理员，仅一次） |
 | `/login` | 用户名密码登录 / 注册（注册需图片验证码） |
 | `/admin` | 用户管理：注册开关与已注册用户列表 |
 
-两个页面导出时都会弹出系统「另存为」窗口（Chrome / Edge 等支持 File System Access API 的浏览器），可直接在资源管理器里选择保存位置并修改文件名；取消则不会生成文件。Safari / Firefox 等不支持该 API 的浏览器会回退到普通下载，使用带时间戳的默认文件名。
+各页面导出时都会弹出系统「另存为」窗口（Chrome / Edge 等支持 File System Access API 的浏览器），可直接在资源管理器里选择保存位置并修改文件名；取消则不会生成文件。Safari / Firefox 等不支持该 API 的浏览器会回退到普通下载，使用带时间戳的默认文件名。
 
 ## 功能
+
+### Word 转 PDF（`/word-to-pdf.html`）
+
+- 拖拽或点击选择 `.docx`，页面尺寸与页边距沿用文档自身的设置（A4 / Letter / 横向都可）
+- **完全在浏览器内转换**，四步链路：`docx-preview` 把 docx 渲染成 HTML 版式 → 按页边距计算可排版区域 → `html2canvas` 把每页栅格化 → `pdf-lib` 合成 PDF
+- 中文无需额外字体文件：文字由浏览器渲染成像素，不会出现缺字或方框
+- 自动分页：按文档的页边距算出每页正文高度，再在「不横切文字行 / 表格行 / 图片」的位置下刀，页与页之间不会重复或漏行
+- 页眉、页脚在文档中只出现一次，转换时单独截图并逐页贴回，所以每页都有页眉页脚
+- 长文档分块截图（每次最多 3 页），避免超大画布导致浏览器崩溃；边转边显示进度
+- 输出质量可选：标准（约 144 DPI）/ 高清（约 192 DPI，默认）/ 超清（约 288 DPI）
+- 旧版 `.doc`、加了打开密码的文档会给出明确提示，不会静默失败
+
+> 说明：PDF 由页面图片合成，**文字不可复制、不可搜索**，可选中文字的需求需要服务端排版引擎（LibreOffice 等），本项目不采用。极复杂的分栏、竖排、公式排版可能有细微差异。
 
 ### PDF 合并（`/merge-pdf.html`）
 
@@ -45,12 +59,12 @@
 
 ### 用户系统（Cloudflare D1）
 
-所有功能（首页、PDF 合并、PDF 编辑、用户管理）都需要登录后才能使用。打开任意工具页时会自动检查：未初始化则跳转 `/init`，未登录则跳转 `/login`。合并本身在浏览器内完成，但页面仍受登录门禁保护；保留的 `/merge` 接口也在服务端校验登录态，未登录返回 401。
+所有功能（首页、Word 转 PDF、PDF 合并、PDF 编辑、用户管理）都需要登录后才能使用。打开任意工具页时会自动检查：未初始化则跳转 `/init`，未登录则跳转 `/login`。合并本身在浏览器内完成，但页面仍受登录门禁保护；保留的 `/merge` 接口也在服务端校验登录态，未登录返回 401。
 
 - `/init`：首次访问时创建管理员账号（用户名 + 密码，只能初始化一次）。初始化完成后该页面关闭。
 - `/login`：所有用户统一使用用户名 + 密码登录；注册时额外需要图片验证码。不发送邮件。
 - `/admin`：管理员可一键关闭 / 开启「允许用户注册」，并查看已注册用户。关闭注册只影响新用户，**已注册用户仍可正常登录，账号数据不受影响**。
-- 首页、合并页、编辑页右上角有当前用户头像菜单：普通用户可修改密码、退出登录；管理员额外有「管理中心」入口。
+- 首页、Word 转 PDF 页、合并页、编辑页右上角有当前用户头像菜单：普通用户可修改密码、退出登录；管理员额外有「管理中心」入口。
 - 登录、注册、初始化成功后默认跳转首页；管理员需要进入管理页时从头像菜单打开「管理中心」。
 
 用户数据保存在 Cloudflare D1 数据库 `covertpdf-db`（Worker binding 名为 `DB`），表结构见根目录的 `init_covertpdf_db.sql`：
@@ -94,7 +108,7 @@ npm run deploy
 
 ## API
 
-### `GET /`、`/merge-pdf.html`、`/edit-pdf.html`
+### `GET /`、`/merge-pdf.html`、`/edit-pdf.html`、`/word-to-pdf.html`
 
 由 `public/` 下的静态资源直接提供（不经 Worker）；编辑页所需的 `/vendor/` 资源同理。
 
@@ -134,7 +148,7 @@ curl -X POST http://localhost:8787/merge \
 
 ## 限制
 
-网页端（`/merge-pdf.html` 与 `/edit-pdf.html`）都在浏览器内完成，**文件大小与数量不再有服务器侧上限**，实际可处理的规模取决于本机内存与浏览器能力。合并时总量超过 300 MB、编辑时文件超过 150 MB 或页数超过 300 页，会先弹一次确认提醒，确认后照常处理。
+网页端（`/word-to-pdf.html`、`/merge-pdf.html` 与 `/edit-pdf.html`）都在浏览器内完成，**文件大小与数量不再有服务器侧上限**，实际可处理的规模取决于本机内存与浏览器能力。合并时总量超过 300 MB、编辑时文件超过 150 MB 或页数超过 300 页，会先弹一次确认提醒，确认后照常处理；Word 转 PDF 单文件上限 60 MB。
 
 下表是仍然存在的限制，以及保留的服务端 `/merge` API 的旧上限：
 
@@ -153,13 +167,14 @@ curl -X POST http://localhost:8787/merge \
 ```
 src/index.js                 Worker 入口：/merge、用户系统 API、/health、校验与合并
 public/index.html            主页面（内联 CSS/JS）
+public/word-to-pdf.html      Word 转 PDF 页面（内联 CSS/JS）
 public/merge-pdf.html        合并页面（内联 CSS/JS）
 public/edit-pdf.html         编辑页面（内联 CSS/JS）
 public/login.html            登录 / 注册页面
 public/init.html             首次初始化管理员页面（路由 /init）
 public/admin.html            用户管理页面
 public/user-menu.js          首页 / 合并页 / 编辑页的右上角用户菜单与改密弹窗
-public/vendor/               pdf.js / pdf-lib 及字体资源（由 npm 包复制，无 CDN 依赖）
+public/vendor/               pdf.js / pdf-lib / docx-preview / html2canvas / jszip 及字体资源（由 npm 包复制，无 CDN 依赖）
 init_covertpdf_db.sql        D1 初始化脚本（唯一的建表 SQL）
 public/favicon.svg           SVG 图标
 public/favicon.ico           ICO 图标（16px / 32px）
