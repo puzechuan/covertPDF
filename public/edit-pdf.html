@@ -89,6 +89,7 @@
   .drop-hint {
     position: absolute; inset: 0; display: grid; place-content: center; justify-items: center;
     gap: 8px; color: var(--muted); text-align: center; padding: 20px;
+    cursor: pointer; user-select: none;
   }
   .drop-hint svg { width: 56px; height: 56px; color: #c7d2fe; }
   .drop-hint strong { color: var(--text); font-size: 17px; }
@@ -182,7 +183,7 @@
         <path d="M14 2v6h6"></path>
         <path d="M9 15h6"></path><path d="m12 12 3 3-3 3"></path>
       </svg>
-      <strong>拖拽 PDF 到此处，或点击右上角「打开 PDF」</strong>
+      <strong>双击页面打开 PDF，或把文件拖到这里</strong>
       <span class="tip">文字、高亮、画笔、矩形均在浏览器内处理，文件不会上传</span>
     </div>
     <div class="stage-wrap" id="stageWrap" hidden>
@@ -946,6 +947,14 @@
     e.preventDefault();
     workspace.classList.remove('over');
     loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+
+  // 空状态下双击页面即可打开 PDF；已打开文档时不做拦截，避免标注时误触覆盖当前文件。
+  workspace.addEventListener('dblclick', function (e) {
+    if (state.pages.length) return;
+    if (e.target.closest('button, input, label, a, textarea')) return;
+    e.preventDefault();
+    fileInput.click();
   });
 
   function timestamp() {
