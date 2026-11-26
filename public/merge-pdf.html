@@ -31,6 +31,12 @@
   header { text-align: center; margin-bottom: 28px; }
   h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.5px; }
   header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .local-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; padding: 4px 12px; border-radius: 999px;
+    background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857;
+    font-size: 12px; font-weight: 600;
+  }
   .card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -94,25 +100,36 @@
     border: 1px solid var(--line); background: #fff; color: var(--muted);
     padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px;
   }
-  .ghost:hover { color: var(--text); border-color: #9ca3af; }
+  .ghost:hover:not(:disabled) { color: var(--text); border-color: #9ca3af; }
+  .ghost:disabled { opacity: .5; cursor: not-allowed; }
   .primary {
     border: 0; background: var(--accent); color: #fff; font-weight: 600;
     padding: 10px 22px; border-radius: 9px; cursor: pointer; font-size: 14px;
     box-shadow: 0 4px 12px rgba(79, 70, 229, .25);
   }
   .primary:hover:not(:disabled) { background: var(--accent-dark); }
-  .primary:disabled { opacity: .6; cursor: wait; }
+  .primary:disabled { opacity: .6; cursor: progress; }
   .status { margin-top: 16px; font-size: 14px; min-height: 22px; }
   .status.info { color: var(--muted); }
   .status.error { color: var(--danger); }
   .status.success { color: var(--ok); }
+  .progress {
+    height: 4px; border-radius: 999px; background: #eef2ff;
+    overflow: hidden; margin-top: 10px; display: none;
+  }
+  .progress.on { display: block; }
+  .progress i {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, #6366f1, #4f46e5);
+    transition: width .2s ease;
+  }
   .result {
     margin-top: 14px; padding: 16px; border-radius: 10px;
     background: #ecfdf5; border: 1px solid #a7f3d0; font-size: 14px;
   }
   .result a { color: var(--ok); font-weight: 700; text-decoration: none; }
   .result a:hover { text-decoration: underline; }
-  footer { text-align: center; color: #9ca3af; font-size: 12px; margin-top: 22px; }
+  footer { text-align: center; color: #9ca3af; font-size: 12px; margin-top: 22px; line-height: 1.8; }
   @media (max-width: 600px) {
     .wrap { padding: 28px 14px; }
     .card { padding: 18px; }
@@ -127,6 +144,7 @@
   <header>
     <h1>PDF合并</h1>
     <p><a href="/" style="color:var(--accent);text-decoration:none">← 返回 PDF 工具箱</a></p>
+    <div class="local-pill">🔒 在本机浏览器内合并，文件不会上传</div>
   </header>
 
   <div class="card">
@@ -154,14 +172,19 @@
     </div>
 
     <div class="status info" id="status"></div>
+    <div class="progress" id="progress"><i id="progressBar"></i></div>
     <div class="result" id="result" hidden>
       ✓ 合并完成！<a id="downloadLink" href="#" download="merged.pdf">下载合并后的 PDF</a>
     </div>
   </div>
 
-  <footer>单文件最大 40 MB · 总计最大 60 MB · 最多 30 个文件 · 不支持加密 PDF</footer>
+  <footer>
+    不限制文件大小与数量，只取决于本机内存与浏览器能力<br>
+    加密 PDF 请先解除密码；扫描件与普通 PDF 均可直接合并
+  </footer>
 </div>
 
+<script src="/vendor/pdf-lib.min.js"></script>
 <script>
 (function () {
   var input = document.getElementById('fileInput');
@@ -173,11 +196,17 @@
   var mergeBtn = document.getElementById('mergeBtn');
   var clearBtn = document.getElementById('clearBtn');
   var statusEl = document.getElementById('status');
+  var progressEl = document.getElementById('progress');
+  var progressBar = document.getElementById('progressBar');
   var result = document.getElementById('result');
   var downloadLink = document.getElementById('downloadLink');
   var files = [];
   var objectUrl = null;
   var dragDepth = 0;
+  var busy = false;
+
+  // 浏览器合并的瓶颈是内存，超过这个总量时提醒用户（不阻止）。
+  var BIG_TOTAL_BYTES = 300 * 1024 * 1024;
 
   function fmt(n) {
     if (n < 1024) return n + ' B';
@@ -222,6 +251,23 @@
     statusEl.className = 'status ' + (kind || 'info');
   }
 
+  function setProgress(ratio) {
+    if (ratio === null) {
+      progressEl.classList.remove('on');
+      progressBar.style.width = '0%';
+      return;
+    }
+    progressEl.classList.add('on');
+    progressBar.style.width = Math.max(0, Math.min(1, ratio)) * 100 + '%';
+  }
+
+  function setBusy(value) {
+    busy = value;
+    mergeBtn.disabled = value;
+    clearBtn.disabled = value;
+    render();
+  }
+
   function render() {
     list.innerHTML = '';
     empty.hidden = files.length > 0;
@@ -236,15 +282,16 @@
         '<div class="meta"><div class="name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</div>' +
         '<div class="size">' + fmt(file.size) + '</div></div>' +
         '<div class="actions">' +
-          '<button type="button" class="icon" data-act="up" data-i="' + i + '" title="上移"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
-          '<button type="button" class="icon" data-act="down" data-i="' + i + '" title="下移"' + (i === files.length - 1 ? ' disabled' : '') + '>↓</button>' +
-          '<button type="button" class="icon remove" data-act="remove" data-i="' + i + '" title="移除">×</button>' +
+          '<button type="button" class="icon" data-act="up" data-i="' + i + '" title="上移"' + (i === 0 || busy ? ' disabled' : '') + '>↑</button>' +
+          '<button type="button" class="icon" data-act="down" data-i="' + i + '" title="下移"' + (i === files.length - 1 || busy ? ' disabled' : '') + '>↓</button>' +
+          '<button type="button" class="icon remove" data-act="remove" data-i="' + i + '" title="移除"' + (busy ? ' disabled' : '') + '>×</button>' +
         '</div>';
       list.appendChild(li);
     });
   }
 
   function addFiles(fileList) {
+    if (busy) return;
     var added = 0;
     var skipped = 0;
     Array.prototype.forEach.call(fileList, function (file) {
@@ -258,7 +305,54 @@
     render();
   }
 
-  dropzone.addEventListener('click', function () { input.click(); });
+  // 本地合并：逐个读入文件，把页面复制进新文档。整个过程不发起任何网络请求。
+  async function mergeLocally(onStep) {
+    if (!window.PDFLib || !window.PDFLib.PDFDocument) {
+      throw new Error('PDF 引擎加载失败，请刷新页面重试。');
+    }
+    var out = await window.PDFLib.PDFDocument.create();
+    var totalPages = 0;
+    var emptyFiles = [];
+
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      await onStep(i, files.length, file.name);
+
+      var buffer = await file.arrayBuffer();
+      if (!buffer.byteLength) throw new Error('「' + file.name + '」是空文件。');
+
+      var src;
+      try {
+        src = await window.PDFLib.PDFDocument.load(buffer, { updateMetadata: false });
+      } catch (e) {
+        var message = String((e && e.message) || e);
+        if (/encrypt/i.test(message)) {
+          throw new Error('「' + file.name + '」是加密 PDF，请先解除密码后再合并。');
+        }
+        throw new Error('「' + file.name + '」解析失败，可能已损坏或不是真正的 PDF。');
+      }
+
+      var indices = src.getPageIndices();
+      if (!indices.length) {
+        emptyFiles.push(file.name);
+      } else {
+        var pages = await out.copyPages(src, indices);
+        for (var p = 0; p < pages.length; p++) out.addPage(pages[p]);
+        totalPages += indices.length;
+      }
+      // 主动断开引用，尽早释放上一份文件占用的内存。
+      buffer = null;
+      src = null;
+    }
+
+    if (!totalPages) throw new Error('所选文件都没有可合并的页面。');
+
+    await onStep(files.length, files.length, '正在生成合并文件');
+    var bytes = await out.save({ useObjectStreams: true });
+    return { bytes: bytes, pages: totalPages, emptyFiles: emptyFiles };
+  }
+
+  dropzone.addEventListener('click', function () { if (!busy) input.click(); });
   input.addEventListener('change', function () {
     addFiles(input.files);
     input.value = '';
@@ -276,6 +370,7 @@
   });
 
   list.addEventListener('click', function (e) {
+    if (busy) return;
     var btn = e.target.closest('button[data-act]');
     if (!btn) return;
     var i = Number(btn.getAttribute('data-i'));
@@ -287,57 +382,81 @@
   });
 
   clearBtn.addEventListener('click', function () {
+    if (busy) return;
     files = [];
     render();
     result.hidden = true;
     setStatus('', 'info');
+    setProgress(null);
   });
 
   mergeBtn.addEventListener('click', async function () {
+    if (busy) return;
     if (!files.length) { setStatus('请先添加 PDF 文件。', 'error'); return; }
-    mergeBtn.disabled = true;
+
+    var totalBytes = files.reduce(function (n, f) { return n + f.size; }, 0);
+    if (totalBytes > BIG_TOTAL_BYTES) {
+      var ok = window.confirm(
+        '待合并文件共 ' + fmt(totalBytes) + '，浏览器需要把它们全部读入内存，\n' +
+        '大文件可能较慢或因内存不足失败。是否继续？'
+      );
+      if (!ok) return;
+    }
+
+    setBusy(true);
     result.hidden = true;
+    setProgress(0);
+
     var save = await requestSaveHandle('merged-' + timestamp() + '.pdf');
     if (save.canceled) {
       setStatus('已取消保存。', 'info');
-      mergeBtn.disabled = false;
+      setProgress(null);
+      setBusy(false);
       return;
     }
-    setStatus('正在上传并合并，请稍候…', 'info');
-    var fd = new FormData();
-    files.forEach(function (f) { fd.append('files', f, f.name); });
+
+    setStatus('正在读取并合并，请稍候…', 'info');
     try {
-      var res = await fetch('/merge', { method: 'POST', body: fd });
-      if (!res.ok) {
-        var data = {};
-        try { data = await res.json(); } catch (e) {}
-        throw new Error(data.error || ('请求失败（HTTP ' + res.status + '）'));
-      }
-      var blob = await res.blob();
+      var merged = await mergeLocally(async function (done, total, label) {
+        setStatus('正在处理 ' + Math.min(done + 1, total) + ' / ' + total + '：' + label, 'info');
+        setProgress(total ? done / total : 0);
+        // 让出主线程，保证进度能刷新出来。
+        await new Promise(function (r) { setTimeout(r, 0); });
+      });
+
+      setProgress(1);
+      var blob = new Blob([merged.bytes], { type: 'application/pdf' });
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(blob);
-      var pages = res.headers.get('X-Merged-Pages');
-      var cd = res.headers.get('Content-Disposition') || '';
-      var m = /filename="([^"]+)"/.exec(cd);
+
+      var filename = 'merged-' + timestamp() + '.pdf';
       downloadLink.href = objectUrl;
-      downloadLink.download = m ? m[1] : 'merged.pdf';
-      downloadLink.textContent = '再次下载合并后的 PDF' + (pages ? '（共 ' + pages + ' 页，' + fmt(blob.size) + '）' : '');
+      downloadLink.download = filename;
+      downloadLink.textContent = '再次下载合并后的 PDF（共 ' + merged.pages + ' 页，' + fmt(blob.size) + '）';
       result.hidden = false;
+
+      var tail = merged.emptyFiles.length ? '（已跳过无页面的文件：' + merged.emptyFiles.join('、') + '）' : '';
+
       if (save.handle) {
-        await writeToHandle(save.handle, blob);
-        setStatus('已保存到所选位置！', 'success');
+        try {
+          await writeToHandle(save.handle, blob);
+          setStatus('已保存到所选位置，共 ' + merged.pages + ' 页，' + fmt(blob.size) + '。' + tail, 'success');
+        } catch (writeErr) {
+          setStatus('写入所选位置失败：' + (writeErr.message || writeErr) + '，请点击下方链接下载。', 'error');
+        }
       } else {
-        setStatus('合并完成！当前浏览器不支持保存对话框，已下载到默认目录。', 'info');
         downloadLink.click();
+        setStatus('合并完成，共 ' + merged.pages + ' 页，' + fmt(blob.size) + '，已开始下载。' + tail, 'success');
       }
     } catch (err) {
-      setStatus('合并失败：' + err.message, 'error');
+      setStatus('合并失败：' + (err && err.message ? err.message : err), 'error');
+      setProgress(null);
     } finally {
-      mergeBtn.disabled = false;
+      setBusy(false);
     }
   });
 
-  window.addEventListener('unload', function () { if (objectUrl) URL.revokeObjectURL(objectUrl); });
+  window.addEventListener('pagehide', function () { if (objectUrl) URL.revokeObjectURL(objectUrl); });
   render();
 })();
 </script>
