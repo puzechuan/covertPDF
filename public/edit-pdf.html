@@ -205,8 +205,11 @@
 (function () {
   'use strict';
 
-  var MAX_FILE_BYTES = 40 * 1024 * 1024;
-  var MAX_PAGES = 100;
+  // 编辑全程在浏览器内完成，不经过服务器，因此没有硬性大小/页数上限。
+  // 下面只是"软提醒"阈值：超过时先确认一次，用户同意即可继续。
+  var BIG_FILE_BYTES = 150 * 1024 * 1024;
+  var BIG_PAGES = 300;
+  var THUMB_EAGER = 12;
   var FONT = '"PingFang SC", "Microsoft YaHei", sans-serif';
 
   var fileInput = document.getElementById('fileInput');
@@ -441,19 +444,61 @@
     drawAll(ctx, entry.annotations, canvas.width, canvas.height);
   }
 
+  // 缩略图惰性渲染：可见区域优先，其余在后台一张张补齐，避免大文档一打开就排队画上千张图。
+  var thumbObserver = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) paintThumb(Number(en.target.dataset.index));
+        });
+      }, { rootMargin: '240px 0px' })
+    : null;
+
+  var thumbFillToken = 0;
+
+  function sizeThumb(canvas, entry) {
+    var vp = entry.pdfPage.getViewport({ scale: 0.16 });
+    canvas.width = Math.max(1, Math.round(vp.width));
+    canvas.height = Math.max(1, Math.round(vp.height));
+  }
+
+  function paintThumb(i) {
+    var item = thumbs.children[i];
+    if (!item) return Promise.resolve();
+    item.dataset.rendered = '1';
+    if (thumbObserver) thumbObserver.unobserve(item);
+    return renderThumb(i, item.querySelector('canvas'));
+  }
+
+  async function fillThumbs(token) {
+    for (var i = 0; i < state.pages.length; i++) {
+      if (token !== thumbFillToken) return;               // 侧栏已重绘，放弃这一轮
+      var item = thumbs.children[i];
+      if (!item || item.dataset.rendered === '1') continue;
+      await paintThumb(i);
+      await new Promise(function (r) { setTimeout(r, 40); }); // 让出主线程，交互不卡
+    }
+  }
+
   function renderThumbs() {
+    if (thumbObserver) thumbObserver.disconnect();
     thumbs.innerHTML = '';
     state.pages.forEach(function (entry, i) {
       var item = document.createElement('div');
       item.className = 'thumb-item' + (i === state.current ? ' active' : '');
+      item.dataset.index = String(i);
       item.innerHTML =
         '<div class="thumb-head"><span>第 ' + (i + 1) + ' 页</span>' +
         '<button type="button" class="thumb-del" data-del="' + i + '" title="删除此页">×</button></div>' +
         '<canvas></canvas>';
       item.addEventListener('click', function () { goToPage(i); });
       thumbs.appendChild(item);
-      renderThumb(i, item.querySelector('canvas'));
+      var canvas = item.querySelector('canvas');
+      sizeThumb(canvas, entry);
+      if (!thumbObserver || i < THUMB_EAGER || i === state.current) paintThumb(i);
+      else thumbObserver.observe(item);
     });
+    // 首屏画完后，后台把剩下的补齐；滚动跳过的也会在稍后出现。
+    fillThumbs(++thumbFillToken);
   }
 
   function refreshThumb(i) {
@@ -470,6 +515,8 @@
     Array.prototype.forEach.call(thumbs.children, function (el, idx) {
       el.classList.toggle('active', idx === i);
     });
+    // 跳到还没渲染缩略图的页时补渲染一张，保证侧栏与主视图一致。
+    paintThumb(i);
     await renderCurrent();
   }
 
@@ -488,9 +535,12 @@
       setStatus('请选择 PDF 文件。', 'error');
       return;
     }
-    if (file.size > MAX_FILE_BYTES) {
-      setStatus('文件超过 ' + fmt(MAX_FILE_BYTES) + '，请先拆分。', 'error');
-      return;
+    if (file.size > BIG_FILE_BYTES) {
+      var okSize = window.confirm(
+        '「' + file.name + '」有 ' + fmt(file.size) + '，\n' +
+        '浏览器需要整份载入内存，打开与导出可能较慢，超大文件甚至可能失败。是否继续？'
+      );
+      if (!okSize) { setStatus('已取消打开。'); return; }
     }
     if (!textEditor.hidden) closeTextEditor();
     setStatus('正在打开 ' + file.name + ' …');
@@ -503,13 +553,23 @@
         standardFontDataUrl: '/vendor/standard_fonts/'
       });
       var pdf = await task.promise;
-      if (pdf.numPages > MAX_PAGES) {
-        setStatus('文件共 ' + pdf.numPages + ' 页，超过 ' + MAX_PAGES + ' 页上限。', 'error');
-        return;
+      if (pdf.numPages > BIG_PAGES) {
+        var okPages = window.confirm(
+          '该文件共 ' + pdf.numPages + ' 页，\n' +
+          '缩略图与逐页渲染会占用较多内存、滚动时可能卡顿。是否继续？'
+        );
+        if (!okPages) {
+          try { await pdf.destroy(); } catch (e) {}
+          setStatus('已取消打开。');
+          return;
+        }
       }
       var bytes = new Uint8Array(await file.arrayBuffer());
       var pages = [];
       for (var i = 1; i <= pdf.numPages; i++) {
+        if (pdf.numPages > 20 && (i === 1 || i % 10 === 0 || i === pdf.numPages)) {
+          setStatus('正在解析页面 ' + i + ' / ' + pdf.numPages + ' …');
+        }
         var pdfPage = await pdf.getPage(i);
         var entry = { pdfPage: pdfPage, sourceIndex: i, annotations: [], textItems: [] };
         try {
