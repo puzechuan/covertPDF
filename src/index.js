@@ -10,7 +10,12 @@ const COOKIE_NAME = 'pdf_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const CODE_SECONDS = 5 * 60;
 
-let schemaReady = null;
+// 首次请求时自动建表，同一 isolate 内只执行一次。
+// 注意：这里只用一个布尔标记，不能缓存 Promise —— 缓存的 Promise 一旦被后续请求 await，
+// 就会触发 "This promise was created by a request that has since ended" 错误
+// （handle_cross_request_promise_resolution 兼容性标志下，跨请求的落定会被丢弃）。
+// 所有 DDL 都是 IF NOT EXISTS / INSERT OR IGNORE，并发重复执行是安全的。
+let schemaReady = false;
 
 function schemaStatements() {
   return SCHEMA_SQL
@@ -22,19 +27,17 @@ function schemaStatements() {
     .filter(Boolean);
 }
 
-// 首次请求时自动建表；同一 isolate 内只执行一次，DDL 使用 IF NOT EXISTS 可安全并发。
-function ensureSchema(env) {
-  if (!schemaReady) {
-    schemaReady = (async () => {
-      for (const sql of schemaStatements()) {
-        await env.DB.prepare(sql).run();
-      }
-    })().catch((error) => {
-      schemaReady = null;
-      throw error;
-    });
+async function ensureSchema(env) {
+  if (schemaReady) return;
+  for (const sql of schemaStatements()) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch (error) {
+      // 并发初始化时另一条请求可能刚建好同名对象，忽略这类竞态。
+      if (!/already exists/i.test(String(error?.message || error))) throw error;
+    }
   }
-  return schemaReady;
+  schemaReady = true;
 }
 
 const CORS_HEADERS = {
