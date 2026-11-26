@@ -30,6 +30,7 @@
   .btn:disabled { opacity:.55; cursor:wait; }
   .btn.block { width:100%; margin-top:20px; padding:11px; }
   .status { margin-top:14px; min-height:22px; font-size:13px; color:var(--muted); }
+  .notice { margin-top:12px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#f8fafc; color:var(--muted); font-size:12px; text-align:center; }
   .status.error { color:var(--danger); }
   .status.success { color:var(--ok); }
   .signed { text-align:center; padding:10px 0; }
@@ -70,6 +71,7 @@
       </div>
 
       <button type="button" class="btn block" id="submitBtn">登录</button>
+      <div class="notice" id="closedNotice" hidden>当前系统管理员已经关闭注册，可登录原有账号</div>
       <div class="status" id="status"></div>
     </div>
     <div class="signed" id="signedView" hidden>
@@ -102,6 +104,7 @@
   var signOutBtn = document.getElementById('signOutBtn');
   var tabsEl = document.getElementById('authTabs');
   var registerTab = document.getElementById('registerTab');
+  var closedNotice = document.getElementById('closedNotice');
   var mode = 'login';
   var settings = { registrationEnabled: true, initialized: true };
   var captchaToken = '';
@@ -144,6 +147,7 @@
     var on = !!enabled;
     tabsEl.hidden = !on;
     registerTab.hidden = !on;
+    closedNotice.hidden = on;
     if (!on && mode !== 'login') setMode('login');
     document.title = (on ? '登录 / 注册' : '登录') + ' - PDF 工具箱';
     document.body.classList.add('ready');
